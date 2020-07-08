@@ -1,0 +1,33 @@
+{
+	"name": "tb-cli",
+	"version": "0.1.0",
+	"description": "ThingsBoard CLI",
+	"main": "build/index.js",
+	"scripts": {
+		"start:build": "tsc -w",
+		"start:run": "nodemon build/index.js",
+		"start": "concurrently npm:start:*",
+		"test": "npm i -g && tb"
+	},
+	"keywords": [],
+	"author": "M.Hassan Mojab",
+	"license": "MIT",
+	"bin": {
+		"tb": "./build/index.js"
+	},
+	"devDependencies": {
+		"concurrently": "^5.2.0",
+		"nodemon": "^2.0.4",
+		"ts-node": "^8.10.2"
+	},
+	"dependencies": {
+		"@types/jwt-decode": "^2.2.1",
+		"@types/node": "^14.0.18",
+		"axios": "^0.19.2",
+		"commander": "^5.1.0",
+		"jwt-decode": "^2.2.0",
+		"keytar": "^6.0.1",
+		"moment": "^2.27.0",
+		"typescript": "^3.9.6"
+	}
+}
