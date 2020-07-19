@@ -99,8 +99,9 @@ const logout = async () => {
   await keytar.deletePassword('tb-refresh-token', 'default');
 };
 
-const backup = async () => {
-  const dir = `./backups/${moment().format('YYYY-MM-DD HH:mm:ss')}`;
+const backup = async (output: string) => {
+  const baseDir = output || './backups';
+  const dir = `${baseDir}/${moment().format('YYYY-MM-DD HH:mm:ss')}`;
 
   fs.mkdirSync(dir, { recursive: true });
   fs.mkdirSync(`${dir}/rules`);
@@ -268,11 +269,12 @@ program
 
 program
   .command('backup')
+  .option('-o, --output <directory>', 'Directory to store backups')
   .description('Backup ThingsBoard Rules, Widgets & Dashboards')
-  .action(async () => {
+  .action(async (cmdObj?: any) => {
     getBaseURL();
     await auth();
-    await backup();
+    await backup(cmdObj.output);
   });
 
 program
