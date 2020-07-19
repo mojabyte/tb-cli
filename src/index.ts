@@ -77,7 +77,7 @@ const auth = async () => {
         setToken(data.token);
         return;
       }
-      console.log('You are not logged in. Please login by "tb login <username> <password>"');
+      console.log('Login token expired. Please login again by "tb login <username> <password>"');
       process.exit(1);
     }
     setToken(token);
@@ -208,6 +208,42 @@ const backup = async () => {
   });
 };
 
+const clone = async (dashboardName: string, deviceName: string, name?: string) => {
+  const {
+    data: { data: dashboards },
+  } = await axios.get(`/tenant/dashboards?limit=1&textSearch=${dashboardName}`);
+
+  if (!dashboards[0]) {
+    console.log(`Dashboard ${dashboardName} not found!`);
+    process.exit(1);
+  }
+  const dashboard = dashboards[0];
+
+  const {
+    data: { data: devices },
+  } = await axios.get(`/tenant/devices?limit=1&textSearch=${deviceName}`);
+
+  if (!devices[0]) {
+    console.log(`Devices ${deviceName} not found!`);
+    process.exit(1);
+  }
+  const device = devices[0];
+
+  const clonedDashboardName = name || device.name;
+
+  const { data: dashboardData } = await axios.get(`/dashboard/${dashboard.id.id}`);
+  const dashboardEntityAliasID = Object.keys(dashboardData.configuration.entityAliases)[0];
+  dashboardData.configuration.entityAliases[dashboardEntityAliasID].filter.singleEntity.id =
+    device.id.id;
+  dashboardData.configuration.entityAliases[dashboardEntityAliasID].alias = device.name;
+  dashboardData.name = dashboardData.title = dashboardData.configuration.states.default.name = clonedDashboardName;
+  delete dashboardData.id;
+
+  await axios.post('dashboard', dashboardData);
+
+  console.log(`Dashboard ${clonedDashboardName} created successfully`);
+};
+
 program
   .command('set-url <url>')
   .description('Set ThingsBoard URL')
@@ -237,6 +273,18 @@ program
     getBaseURL();
     await auth();
     await backup();
+  });
+
+program
+  .passCommandToAction(false)
+  .storeOptionsAsProperties(false)
+  .command('clone <dashboardName> <deviceName>')
+  .option('-n, --name <name>', 'Name of Cloned Dashboard')
+  .description('Clone ThingsBoard Dashboards')
+  .action(async (dashboardName: string, deviceName: string, cmdObj?: any) => {
+    getBaseURL();
+    await auth();
+    await clone(dashboardName.toLowerCase(), deviceName.toLowerCase(), cmdObj.name);
   });
 
 program.parse(process.argv);
