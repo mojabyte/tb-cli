@@ -69,23 +69,27 @@ const auth = async () => {
 
   if (token) {
     const decodedToken: any = jwtDecode(token);
-    if (decodedToken.exp < moment().unix() - 60 && refreshToken) {
-      if (refreshToken) {
+    if (decodedToken.exp > moment().unix() + 60) {
+      setToken(token);
+    } else if (refreshToken) {
+      const decodedRefreshToken: any = jwtDecode(refreshToken);
+      if (decodedRefreshToken.exp > moment().unix() + 10) {
         const { data } = await axios.post('/auth/token', { refreshToken });
         await keytar.setPassword('tb-token', 'default', data.token);
         await keytar.setPassword('tb-refresh-token', 'default', data.refreshToken);
         setToken(data.token);
-        return;
+      } else {
+        console.log('Login token expired. Please login again by "tb login <username> <password>"');
+        process.exit(1);
       }
+    } else {
       console.log('Login token expired. Please login again by "tb login <username> <password>"');
       process.exit(1);
     }
-    setToken(token);
-    return;
+  } else {
+    console.log('You are not logged in. Please login by "tb login <username> <password>"');
+    process.exit(1);
   }
-
-  console.log('You are not logged in. Please login by "tb login <username> <password>"');
-  process.exit(1);
 };
 
 const login = async (username: string, password: string) => {
@@ -101,7 +105,7 @@ const logout = async () => {
 
 const backup = async (output: string) => {
   const baseDir = output || './backups';
-  const dir = `${baseDir}/${moment().format('YYYY-MM-DD HH:mm:ss')}`;
+  const dir = `${baseDir}/${moment().format('YY-MM-DD HH:mm:ss').replace(/[^0-9]/g, '')}`;
 
   fs.mkdirSync(dir, { recursive: true });
   fs.mkdirSync(`${dir}/rules`);
@@ -225,7 +229,7 @@ const clone = async (dashboardName: string, deviceName: string, name?: string) =
   } = await axios.get(`/tenant/devices?limit=1&textSearch=${deviceName}`);
 
   if (!devices[0]) {
-    console.log(`Devices ${deviceName} not found!`);
+    console.log(`Device ${deviceName} not found!`);
     process.exit(1);
   }
   const device = devices[0];
