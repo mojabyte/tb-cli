@@ -74,6 +74,7 @@ const auth = async () => {
     } else if (refreshToken) {
       const decodedRefreshToken: any = jwtDecode(refreshToken);
       if (decodedRefreshToken.exp > moment().unix() + 10) {
+        // ! This API call is not working
         const { data } = await axios.post('/auth/token', { refreshToken });
         await keytar.setPassword('tb-token', 'default', data.token);
         await keytar.setPassword('tb-refresh-token', 'default', data.refreshToken);
@@ -105,7 +106,9 @@ const logout = async () => {
 
 const backup = async (output: string) => {
   const baseDir = output || './backups';
-  const dir = `${baseDir}/${moment().format('YY-MM-DD HH:mm:ss').replace(/[^0-9]/g, '')}`;
+  const dir = `${baseDir}/${moment()
+    .format('YY-MM-DD HH:mm:ss')
+    .replace(/[^0-9]/g, '')}`;
 
   fs.mkdirSync(dir, { recursive: true });
   fs.mkdirSync(`${dir}/rules`);
@@ -249,6 +252,64 @@ const clone = async (dashboardName: string, deviceName: string, name?: string) =
   console.log(`Dashboard ${clonedDashboardName} created successfully`);
 };
 
+const label = async (dashboardName: string, deviceName: string) => {
+  const {
+    data: { data: dashboards },
+  } = await axios.get(`/tenant/dashboards?limit=1&textSearch=${dashboardName}`);
+
+  if (!dashboards[0]) {
+    console.log(`Dashboard ${dashboardName} not found!`);
+    process.exit(1);
+  }
+  const dashboard = dashboards[0];
+
+  const {
+    data: { data: devices },
+  } = await axios.get(`/tenant/devices?limit=1&textSearch=${deviceName}`);
+
+  if (!devices[0]) {
+    console.log(`Device ${deviceName} not found!`);
+    process.exit(1);
+  }
+  const device = devices[0];
+
+  const { data: attributes } = await axios.get(
+    `/plugins/telemetry/DEVICE/${device.id.id}/values/attributes?keys=labels`
+  );
+  const labels = JSON.parse(attributes[0].value);
+
+  const { data: dashboardData } = await axios.get(`/dashboard/${dashboard.id.id}`);
+
+  const { widgets } = dashboardData.configuration;
+
+  Object.keys(widgets).forEach(widgetID => {
+    const widget = widgets[widgetID];
+    if (widget.type === 'rpc') {
+      const { valueKey, valueAttribute } = widget.config.settings;
+      widget.config.title = labels[valueKey || valueAttribute];
+    } else if (widget.type === 'latest' || 'timeseries') {
+      if (widget.config.datasources.length === 1) {
+        widget.config.title =
+          labels[widget.config.datasources[0].dataKeys[0].name] || widget.config.title;
+      } else {
+        widget.config.datasources.forEach(({ dataKeys }: any, i: number) => {
+          dataKeys.forEach(({ name }: { name: string }, j: number) => {
+            widget.config.datasources[i].dataKeys[j].label =
+              labels[name] || widget.config.datasources[i].dataKeys[j].label;
+          });
+        });
+      }
+    }
+    widgets[widgetID] = widget;
+  });
+
+  dashboardData.configuration.widgets = widgets;
+
+  await axios.post('dashboard', dashboardData);
+
+  console.log(`Dashboard ${dashboardName} labeled successfully`);
+};
+
 program
   .command('set-url <url>')
   .description('Set ThingsBoard URL')
@@ -274,7 +335,7 @@ program
 program
   .command('backup')
   .option('-o, --output <directory>', 'Directory to store backups')
-  .description('Backup ThingsBoard Rules, Widgets & Dashboards')
+  .description('Backup Rules, Widgets & Dashboards')
   .action(async (cmdObj?: any) => {
     getBaseURL();
     await auth();
@@ -286,11 +347,20 @@ program
   .storeOptionsAsProperties(false)
   .command('clone <dashboardName> <deviceName>')
   .option('-n, --name <name>', 'Name of Cloned Dashboard')
-  .description('Clone ThingsBoard Dashboards')
+  .description('Clone Dashboards')
   .action(async (dashboardName: string, deviceName: string, cmdObj?: any) => {
     getBaseURL();
     await auth();
     await clone(dashboardName.toLowerCase(), deviceName.toLowerCase(), cmdObj.name);
+  });
+
+program
+  .command('label <dashboardName> <deviceName>')
+  .description('Update Dashboard labels')
+  .action(async (dashboardName: string, deviceName: string) => {
+    getBaseURL();
+    await auth();
+    await label(dashboardName.toLowerCase(), deviceName.toLowerCase());
   });
 
 program.parse(process.argv);
