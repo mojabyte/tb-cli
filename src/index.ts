@@ -180,39 +180,37 @@ const backup = async (output: string) => {
     data: { data: devices },
   } = await axios.get('/tenant/devices?limit=1000&textSearch=');
 
-  const attributeKeys = [
-    'automation',
-    'activityCheck',
-    'filterKeys',
-    'inactivitySMS',
-    'inactivityTimeout',
-    'passageCheck',
-    'passageKeys',
-    'passageSMS',
-    'passageTimeout',
-    'phoneNumber',
-    'rules',
-    'schedule',
-    'TH_MAX',
-    'TH_MIN',
-    'TM_MAX',
-    'TH_MIN',
-  ];
-
   devices.forEach(async (device: any) => {
-    const { data: attributes } = await axios.get(
+    const { data: serverAttributes } = await axios.get(
       `/plugins/telemetry/DEVICE/${device.id.id}/values/attributes/SERVER_SCOPE`
     );
-    const desiredAttributes = attributes.filter(({ key }: { key: string }) =>
-      attributeKeys.includes(key)
-    );
-    desiredAttributes.forEach((item: any) => {
+    serverAttributes.forEach((item: any) => {
       delete item.lastUpdateTs;
     });
 
+    const { data: sharedAttributes } = await axios.get(
+      `/plugins/telemetry/DEVICE/${device.id.id}/values/attributes/SERVER_SCOPE`
+    );
+    sharedAttributes.forEach((item: any) => {
+      delete item.lastUpdateTs;
+    });
+
+    const { data: clientAttributes } = await axios.get(
+      `/plugins/telemetry/DEVICE/${device.id.id}/values/attributes/CLIENT_SCOPE`
+    );
+    clientAttributes.forEach((item: any) => {
+      delete item.lastUpdateTs;
+    });
+
+    const attributes = {
+      server: serverAttributes,
+      shared: sharedAttributes,
+      client: clientAttributes,
+    };
+
     fs.writeFile(
       `${dir}/devices/attributes/${device.name}.json`,
-      JSON.stringify(desiredAttributes),
+      JSON.stringify(attributes),
       (err: any) => {
         if (err) throw err;
       }
