@@ -189,7 +189,7 @@ const backup = async (output: string) => {
     });
 
     const { data: sharedAttributes } = await axios.get(
-      `/plugins/telemetry/DEVICE/${device.id.id}/values/attributes/SERVER_SCOPE`
+      `/plugins/telemetry/DEVICE/${device.id.id}/values/attributes/SHARED_SCOPE`
     );
     sharedAttributes.forEach((item: any) => {
       delete item.lastUpdateTs;
