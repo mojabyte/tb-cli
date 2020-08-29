@@ -111,3 +111,6 @@ build/
 
 # Backups directory
 backups/
+
+# Converts directory
+converts/

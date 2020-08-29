@@ -111,22 +111,26 @@ const backup = async (output: string) => {
     .replace(/[^0-9]/g, '')}`;
 
   fs.mkdirSync(dir, { recursive: true });
-  fs.mkdirSync(`${dir}/rules`);
+  fs.mkdirSync(`${dir}/ruleChains`);
   fs.mkdirSync(`${dir}/widgets`);
   fs.mkdirSync(`${dir}/dashboards`);
   fs.mkdirSync(`${dir}/devices/attributes`, { recursive: true });
 
-  // Backup Rules
+  // Backup Rule Chains
   const {
-    data: { data: rules },
+    data: { data: ruleChains },
   } = await axios.get('/ruleChains?limit=1000&textSearch=');
 
-  rules.forEach(async (rule: any) => {
-    const { data: ruleData } = await axios.get(`/ruleChain/${rule.id.id}/metadata`);
-    fs.writeFile(`${dir}/rules/${rule.name}.json`, JSON.stringify(ruleData), (err: any) => {
-      if (err) throw err;
-      // console.log(`Rule "${rule.name}" Saved!`);
-    });
+  ruleChains.forEach(async (ruleChain: any) => {
+    const { data: ruleChainData } = await axios.get(`/ruleChain/${ruleChain.id.id}/metadata`);
+    fs.writeFile(
+      `${dir}/ruleChains/${ruleChain.name}.json`,
+      JSON.stringify(ruleChainData),
+      (err: any) => {
+        if (err) throw err;
+        // console.log(`Rule "${ruleChain.name}" Saved!`);
+      }
+    );
   });
 
   // Backup widgets
@@ -310,6 +314,57 @@ const label = async (dashboardName: string, deviceName: string) => {
   console.log(`Dashboard ${dashboardName} labeled successfully`);
 };
 
+const convert = async (input: string, output: string) => {
+  const baseDir = output || './converts';
+  const dir = `${baseDir}/${moment()
+    .format('YY-MM-DD HH:mm:ss')
+    .replace(/[^0-9]/g, '')}`;
+
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(`${dir}/ruleChains`);
+  fs.mkdirSync(`${dir}/widgets`);
+  fs.mkdirSync(`${dir}/dashboards`);
+
+  // Convert Rule Chains
+  fs.readdir(`${input}/ruleChains`, (err, filenames) => {
+    if (err) {
+      throw err;
+    }
+    filenames.forEach(filename => {
+      fs.readFile(`${input}/ruleChains/${filename}`, 'utf-8', (err, content) => {
+        if (err) {
+          throw err;
+        }
+        const ruleChain = JSON.parse(content);
+        delete ruleChain.ruleChainId;
+        ruleChain.nodes.forEach((_node: any, index: number) => {
+          delete ruleChain.nodes[index].id;
+          delete ruleChain.nodes[index].createdTime;
+          delete ruleChain.nodes[index].ruleChainId;
+        });
+        const convertedRuleChain = {
+          ruleChain: {
+            additionalInfo: null,
+            name: path.parse(filename).name,
+            firstRuleNodeId: null,
+            root: false,
+            debugMode: false,
+            configuration: null,
+          },
+          metadata: ruleChain,
+        };
+        fs.writeFile(
+          `${dir}/ruleChains/${filename}`,
+          JSON.stringify(convertedRuleChain),
+          (err: any) => {
+            if (err) throw err;
+          }
+        );
+      });
+    });
+  });
+};
+
 program
   .command('set-url <url>')
   .description('Set ThingsBoard URL')
@@ -335,7 +390,7 @@ program
 program
   .command('backup')
   .option('-o, --output <directory>', 'Directory to store backups')
-  .description('Backup Rules, Widgets & Dashboards')
+  .description('Backup Rule Chains, Widgets & Dashboards')
   .action(async (cmdObj?: any) => {
     getBaseURL();
     await auth();
@@ -361,6 +416,16 @@ program
     getBaseURL();
     await auth();
     await label(dashboardName.toLowerCase(), deviceName.toLowerCase());
+  });
+
+program
+  .command('convert <input>')
+  .option('-o, --output <directory>', 'Directory to store converted data')
+  .description('Convert Rule Chains, Widgets & Dashboards from TB v2 to v3')
+  .action(async (input: string, cmdObj?: any) => {
+    getBaseURL();
+    await auth();
+    await convert(input, cmdObj.output);
   });
 
 program.parse(process.argv);
