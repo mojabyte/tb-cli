@@ -29,8 +29,8 @@ const config = readConfigFile();
 
 const getBaseURL = () => {
   try {
-    baseURL = new URL('/api', config.baseURL);
-    axios.defaults.baseURL = baseURL.toString();
+    config.baseURL = new URL('/api', config.baseURL);
+    axios.defaults.baseURL = config.baseURL.toString();
   } catch (e) {
     console.log("error: ThingsBoard URL is not set. set it by 'tb set-url <url>'");
     process.exit(1);
@@ -38,14 +38,14 @@ const getBaseURL = () => {
 };
 
 const setBaseUrl = async (url: string) => {
-  let tbData = { status: 0 };
+  let tbData = { status: 0, message: '' };
   try {
     const { data } = await axios.get(`${url}/api`);
     tbData = data;
   } catch (e) {
-    tbData = e.response.data;
+    tbData = e.response?.data;
   }
-  if (tbData.status !== 401) {
+  if (!(tbData?.status === 401) && !(tbData?.message === 'Authentication failed')) {
     console.log('error: provided URL is not for ThingsBoard');
     process.exit(1);
   }
@@ -64,8 +64,8 @@ const setToken = (token: string) => {
 };
 
 const auth = async () => {
-  const token = await keytar.findPassword('tb-token');
-  const refreshToken = await keytar.findPassword('tb-refresh-token');
+  const token = await keytar.getPassword('tb-token', config.baseURL.host);
+  const refreshToken = await keytar.getPassword('tb-refresh-token', config.baseURL.host);
 
   if (token) {
     const decodedToken: any = jwtDecode(token);
@@ -76,8 +76,8 @@ const auth = async () => {
       if (decodedRefreshToken.exp > moment().unix() + 10) {
         // ! This API call is not working
         const { data } = await axios.post('/auth/token', { refreshToken });
-        await keytar.setPassword('tb-token', 'default', data.token);
-        await keytar.setPassword('tb-refresh-token', 'default', data.refreshToken);
+        await keytar.setPassword('tb-token', config.baseURL.host, data.token);
+        await keytar.setPassword('tb-refresh-token', config.baseURL.host, data.refreshToken);
         setToken(data.token);
       } else {
         console.log('Login token expired. Please login again by "tb login <username> <password>"');
@@ -95,18 +95,18 @@ const auth = async () => {
 
 const login = async (username: string, password: string) => {
   const { data } = await axios.post('/auth/login', { username, password });
-  await keytar.setPassword('tb-token', 'default', data.token);
-  await keytar.setPassword('tb-refresh-token', 'default', data.refreshToken);
+  await keytar.setPassword('tb-token', config.baseURL.host, data.token);
+  await keytar.setPassword('tb-refresh-token', config.baseURL.host, data.refreshToken);
 };
 
 const logout = async () => {
-  await keytar.deletePassword('tb-token', 'default');
-  await keytar.deletePassword('tb-refresh-token', 'default');
+  await keytar.deletePassword('tb-token', config.baseURL.host);
+  await keytar.deletePassword('tb-refresh-token', config.baseURL.host);
 };
 
 const backup = async (output: string) => {
   const baseDir = output || './backups';
-  const dir = `${baseDir}/${moment()
+  const dir = `${baseDir}/${config.baseURL.host}/${moment()
     .format('YY-MM-DD HH:mm:ss')
     .replace(/[^0-9]/g, '')}`;
 
@@ -314,7 +314,7 @@ const label = async (dashboardName: string, deviceName: string) => {
 
 const convert = async (input: string, output: string) => {
   const baseDir = output || './converts';
-  const dir = `${baseDir}/${moment()
+  const dir = `${baseDir}/${config.baseURL.host}/${moment()
     .format('YY-MM-DD HH:mm:ss')
     .replace(/[^0-9]/g, '')}`;
 
