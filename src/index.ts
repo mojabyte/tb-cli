@@ -119,7 +119,7 @@ const backup = async (output: string) => {
   // Backup Rule Chains
   const {
     data: { data: ruleChains },
-  } = await axios.get('/ruleChains?limit=1000&textSearch=');
+  } = await axios.get('/ruleChains?limit=1000&textSearch=&pageSize=1000&page=0');
 
   ruleChains.forEach(async (ruleChain: any) => {
     const { data: ruleChainData } = await axios.get(`/ruleChain/${ruleChain.id.id}/metadata`);
@@ -162,7 +162,7 @@ const backup = async (output: string) => {
   // Backup Dashboards
   const {
     data: { data: dashboards },
-  } = await axios.get('/tenant/dashboards?limit=1000&textSearch=');
+  } = await axios.get('/tenant/dashboards?limit=1000&textSearch=&pageSize=1000&page=0');
 
   dashboards.forEach(async (dashboard: any) => {
     const { data: dashboardData } = await axios.get(`/dashboard/${dashboard.id.id}`);
@@ -178,7 +178,7 @@ const backup = async (output: string) => {
   // Backup device attributes
   const {
     data: { data: devices },
-  } = await axios.get('/tenant/devices?limit=1000&textSearch=');
+  } = await axios.get('/tenant/devices?limit=1000&textSearch=&pageSize=1000&page=0');
 
   devices.forEach(async (device: any) => {
     const { data: serverAttributes } = await axios.get(
