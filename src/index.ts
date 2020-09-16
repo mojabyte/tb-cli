@@ -7,7 +7,6 @@ import fs from 'fs';
 import { program } from 'commander';
 import path from 'path';
 
-let baseURL: URL;
 let account: {
   tenantId: string;
 };
@@ -49,11 +48,9 @@ const setBaseUrl = async (url: string) => {
     console.log('error: provided URL is not for ThingsBoard');
     process.exit(1);
   }
-
-  baseURL = new URL('/api', url);
   config.baseURL = url;
-
   fs.writeFileSync(configFilePath, JSON.stringify(config));
+  config.baseURL = new URL('/api', url);
 };
 
 const setToken = (token: string) => {
@@ -221,7 +218,7 @@ const backup = async (output: string) => {
 const clone = async (dashboardName: string, deviceName: string, name?: string) => {
   const {
     data: { data: dashboards },
-  } = await axios.get(`/tenant/dashboards?limit=1&textSearch=${dashboardName}`);
+  } = await axios.get(`/tenant/dashboards?limit=1&textSearch=${dashboardName}&pageSize=1&page=0`);
 
   if (!dashboards[0]) {
     console.log(`Dashboard ${dashboardName} not found!`);
@@ -231,7 +228,7 @@ const clone = async (dashboardName: string, deviceName: string, name?: string) =
 
   const {
     data: { data: devices },
-  } = await axios.get(`/tenant/devices?limit=1&textSearch=${deviceName}`);
+  } = await axios.get(`/tenant/devices?limit=1&textSearch=${deviceName}&pageSize=1&page=0`);
 
   if (!devices[0]) {
     console.log(`Device ${deviceName} not found!`);
@@ -314,14 +311,14 @@ const label = async (dashboardName: string, deviceName: string) => {
 
 const convert = async (input: string, output: string) => {
   const baseDir = output || './converts';
-  const dir = `${baseDir}/${config.baseURL.host}/${moment()
+  const dir = `${baseDir}/${moment()
     .format('YY-MM-DD HH:mm:ss')
     .replace(/[^0-9]/g, '')}`;
 
   fs.mkdirSync(dir, { recursive: true });
   fs.mkdirSync(`${dir}/ruleChains`);
-  fs.mkdirSync(`${dir}/widgets`);
   fs.mkdirSync(`${dir}/dashboards`);
+  fs.mkdirSync(`${dir}/widgets`);
 
   // Convert Rule Chains
   fs.readdir(`${input}/ruleChains`, (err, filenames) => {
@@ -358,6 +355,28 @@ const convert = async (input: string, output: string) => {
             if (err) throw err;
           }
         );
+      });
+    });
+  });
+
+  // Convert Dashboards
+  fs.readdir(`${input}/dashboards`, (err, filenames) => {
+    if (err) {
+      throw err;
+    }
+    filenames.forEach(filename => {
+      fs.readFile(`${input}/dashboards/${filename}`, 'utf-8', (err, content) => {
+        if (err) {
+          throw err;
+        }
+        const dashboard = JSON.parse(content);
+        delete dashboard.id;
+        delete dashboard.createdTime;
+        delete dashboard.tenantId;
+        delete dashboard.assignedCustomers;
+        fs.writeFile(`${dir}/dashboards/${filename}`, JSON.stringify(dashboard), (err: any) => {
+          if (err) throw err;
+        });
       });
     });
   });
