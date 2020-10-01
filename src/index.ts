@@ -6,6 +6,7 @@ import keytar from 'keytar';
 import fs from 'fs';
 import { program } from 'commander';
 import path from 'path';
+import * as api from './services/api';
 
 let account: {
   tenantId: string;
@@ -116,10 +117,10 @@ const backup = async (output: string) => {
   // Backup Rule Chains
   const {
     data: { data: ruleChains },
-  } = await axios.get('/ruleChains?limit=1000&textSearch=&pageSize=1000&page=0');
+  } = await api.getRuleChains();
 
   ruleChains.forEach(async (ruleChain: any) => {
-    const { data: ruleChainData } = await axios.get(`/ruleChain/${ruleChain.id.id}/metadata`);
+    const { data: ruleChainData } = await api.getRuleChainById(ruleChain.id.id);
     fs.writeFile(
       `${dir}/ruleChains/${ruleChain.name}.json`,
       JSON.stringify(ruleChainData),
@@ -131,13 +132,12 @@ const backup = async (output: string) => {
   });
 
   // Backup widgets
-  const { data: widgetBundles } = await axios.get('/widgetsBundles');
+  const { data: widgetBundles } = await api.getWidgetBundles();
 
   widgetBundles.forEach(async (widgetBundle: any) => {
-    const { data: widgetBundleData } = await axios.get(
-      `widgetTypes?isSystem=${account.tenantId !== widgetBundle.tenantId.id}&bundleAlias=${
-        widgetBundle.alias
-      }`
+    const { data: widgetBundleData } = await api.getWidgetBundlesData(
+      widgetBundle.alias,
+      account.tenantId !== widgetBundle.tenantId.id
     );
     fs.writeFile(
       `${dir}/widgets/${widgetBundle.title}.json`,
@@ -159,10 +159,10 @@ const backup = async (output: string) => {
   // Backup Dashboards
   const {
     data: { data: dashboards },
-  } = await axios.get('/tenant/dashboards?limit=1000&textSearch=&pageSize=1000&page=0');
+  } = await api.getDashboards();
 
   dashboards.forEach(async (dashboard: any) => {
-    const { data: dashboardData } = await axios.get(`/dashboard/${dashboard.id.id}`);
+    const { data: dashboardData } = await api.getDashboardById(dashboard.id.id);
     fs.writeFile(
       `${dir}/dashboards/${dashboard.name}.json`,
       JSON.stringify(dashboardData),
@@ -175,25 +175,29 @@ const backup = async (output: string) => {
   // Backup device attributes & access-tokens
   const {
     data: { data: devices },
-  } = await axios.get('/tenant/devices?limit=1000&textSearch=&pageSize=1000&page=0');
+  } = await api.getDevices();
 
   devices.forEach(async (device: any) => {
-    const { data: serverAttributes } = await axios.get(
-      `/plugins/telemetry/DEVICE/${device.id.id}/values/attributes/SERVER_SCOPE`
+    const deviceId = device.id.id;
+    const { data: serverAttributes } = await api.getDeviceAttributesByScope(
+      deviceId,
+      'SERVER_SCOPE'
     );
     serverAttributes.forEach((item: any) => {
       delete item.lastUpdateTs;
     });
 
-    const { data: sharedAttributes } = await axios.get(
-      `/plugins/telemetry/DEVICE/${device.id.id}/values/attributes/SHARED_SCOPE`
+    const { data: sharedAttributes } = await api.getDeviceAttributesByScope(
+      deviceId,
+      'SHARED_SCOPE'
     );
     sharedAttributes.forEach((item: any) => {
       delete item.lastUpdateTs;
     });
 
-    const { data: clientAttributes } = await axios.get(
-      `/plugins/telemetry/DEVICE/${device.id.id}/values/attributes/CLIENT_SCOPE`
+    const { data: clientAttributes } = await api.getDeviceAttributesByScope(
+      deviceId,
+      'CLIENT_SCOPE'
     );
     clientAttributes.forEach((item: any) => {
       delete item.lastUpdateTs;
@@ -205,9 +209,7 @@ const backup = async (output: string) => {
       client: clientAttributes,
     };
 
-    const { data: credentials } = await axios.get(
-      `/device/${device.id.id}/credentials`
-    );
+    const { data: credentials } = await api.getDeviceCredentials(deviceId);
 
     const accessToken = credentials.credentialsId;
 
@@ -215,7 +217,7 @@ const backup = async (output: string) => {
       `${dir}/devices/${device.name}.json`,
       JSON.stringify({
         accessToken,
-        attributes
+        attributes,
       }),
       (err: any) => {
         if (err) throw err;
@@ -227,7 +229,7 @@ const backup = async (output: string) => {
 const clone = async (dashboardName: string, deviceName: string, name?: string) => {
   const {
     data: { data: dashboards },
-  } = await axios.get(`/tenant/dashboards?limit=1&textSearch=${dashboardName}&pageSize=1&page=0`);
+  } = await api.getDashboards({ pageSize: 1, textSearch: dashboardName });
 
   if (!dashboards[0]) {
     console.log(`Dashboard ${dashboardName} not found!`);
@@ -237,7 +239,7 @@ const clone = async (dashboardName: string, deviceName: string, name?: string) =
 
   const {
     data: { data: devices },
-  } = await axios.get(`/tenant/devices?limit=1&textSearch=${deviceName}&pageSize=1&page=0`);
+  } = await api.getDevices({ pageSize: 1, textSearch: deviceName });
 
   if (!devices[0]) {
     console.log(`Device ${deviceName} not found!`);
@@ -247,7 +249,7 @@ const clone = async (dashboardName: string, deviceName: string, name?: string) =
 
   const clonedDashboardName = name || device.name;
 
-  const { data: dashboardData } = await axios.get(`/dashboard/${dashboard.id.id}`);
+  const { data: dashboardData } = await api.getDashboardById(dashboard.id.id);
   const dashboardEntityAliasID = Object.keys(dashboardData.configuration.entityAliases)[0];
   dashboardData.configuration.entityAliases[dashboardEntityAliasID].filter.singleEntity.id =
     device.id.id;
@@ -263,7 +265,7 @@ const clone = async (dashboardName: string, deviceName: string, name?: string) =
 const label = async (dashboardName: string, deviceName: string) => {
   const {
     data: { data: dashboards },
-  } = await axios.get(`/tenant/dashboards?limit=1&textSearch=${dashboardName}`);
+  } = await api.getDashboards({ pageSize: 1, textSearch: dashboardName });
 
   if (!dashboards[0]) {
     console.log(`Dashboard ${dashboardName} not found!`);
@@ -273,7 +275,7 @@ const label = async (dashboardName: string, deviceName: string) => {
 
   const {
     data: { data: devices },
-  } = await axios.get(`/tenant/devices?limit=1&textSearch=${deviceName}`);
+  } = await api.getDevices({ pageSize: 1, textSearch: deviceName });
 
   if (!devices[0]) {
     console.log(`Device ${deviceName} not found!`);
@@ -281,12 +283,10 @@ const label = async (dashboardName: string, deviceName: string) => {
   }
   const device = devices[0];
 
-  const { data: attributes } = await axios.get(
-    `/plugins/telemetry/DEVICE/${device.id.id}/values/attributes?keys=labels`
-  );
+  const { data: attributes } = await api.getDeviceAttributes(device.id.id, ['LABELS']);
   const labels = JSON.parse(attributes[0].value);
 
-  const { data: dashboardData } = await axios.get(`/dashboard/${dashboard.id.id}`);
+  const { data: dashboardData } = await api.getDashboardById(dashboard.id.id);
 
   const { widgets } = dashboardData.configuration;
 
