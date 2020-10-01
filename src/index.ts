@@ -111,7 +111,7 @@ const backup = async (output: string) => {
   fs.mkdirSync(`${dir}/ruleChains`);
   fs.mkdirSync(`${dir}/widgets`);
   fs.mkdirSync(`${dir}/dashboards`);
-  fs.mkdirSync(`${dir}/devices/attributes`, { recursive: true });
+  fs.mkdirSync(`${dir}/devices`);
 
   // Backup Rule Chains
   const {
@@ -172,7 +172,7 @@ const backup = async (output: string) => {
     );
   });
 
-  // Backup device attributes
+  // Backup device attributes & access-tokens
   const {
     data: { data: devices },
   } = await axios.get('/tenant/devices?limit=1000&textSearch=&pageSize=1000&page=0');
@@ -205,9 +205,18 @@ const backup = async (output: string) => {
       client: clientAttributes,
     };
 
+    const { data: credentials } = await axios.get(
+      `/device/${device.id.id}/credentials`
+    );
+
+    const accessToken = credentials.credentialsId;
+
     fs.writeFile(
-      `${dir}/devices/attributes/${device.name}.json`,
-      JSON.stringify(attributes),
+      `${dir}/devices/${device.name}.json`,
+      JSON.stringify({
+        accessToken,
+        attributes
+      }),
       (err: any) => {
         if (err) throw err;
       }
