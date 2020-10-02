@@ -16,7 +16,7 @@ const DEFAULT_GET_LIST_PARAMS = {
 
 // Rule Chains
 export const getRuleChains = (params: GetListParams = DEFAULT_GET_LIST_PARAMS) =>
-  axios.get('/ruleChains', { params });
+  axios.get('/ruleChains', { params: { page: 0, ...params } });
 export const getRuleChainById = (id: string) => axios.get(`/ruleChain/${id}/metadata`);
 
 // Widgets
@@ -26,16 +26,26 @@ export const getWidgetBundlesData = (alias: string, isSystem: boolean) =>
 
 // Dashboards
 export const getDashboards = (params: GetListParams = DEFAULT_GET_LIST_PARAMS) =>
-  axios.get('/tenant/dashboards', { params });
+  axios.get('/tenant/dashboards', { params: { page: 0, ...params } });
 export const getDashboardById = (id: string) => axios.get(`/dashboard/${id}`);
 
 // Devices
 export const getDevices = (params: GetListParams = DEFAULT_GET_LIST_PARAMS) =>
-  axios.get('/tenant/devices', { params });
+  axios.get('/tenant/devices', { params: { page: 0, ...params } });
+export const saveDevice = (device: any, accessToken?: string) =>
+  axios.post('/device', device, {
+    params: {
+      accessToken,
+    },
+  });
 export const getDeviceCredentials = (id: string) => axios.get(`/device/${id}/credentials`);
+export const saveDeviceCredentials = (credentials: any) =>
+  axios.post('/device/credentials', credentials);
 
 // Attributes
 export const getDeviceAttributesByScope = (id: string, scope: AttributesScope) =>
   axios.get(`/plugins/telemetry/DEVICE/${id}/values/attributes/${scope}`);
 export const getDeviceAttributes = (id: string, keys: string[] = []) =>
   axios.get(`/plugins/telemetry/DEVICE/${id}/values/attributes?keys=${keys.join(',')}`);
+export const saveDeviceAttributes = (id: string, scope: AttributesScope, attributes: any) =>
+  axios.post(`/plugins/telemetry/${id}/${scope}`, attributes);
