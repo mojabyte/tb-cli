@@ -7,6 +7,7 @@ import fs from 'fs';
 import { program } from 'commander';
 import path from 'path';
 import * as api from './services/api';
+import { prompt } from './utils/prompt';
 
 let account: {
   tenantId: string;
@@ -100,8 +101,10 @@ const auth = async () => {
   }
 };
 
-const login = async (username: string, password: string) => {
+const login = async () => {
   try {
+    const username = await prompt('Username : ');
+    const password = await prompt('Password : ', true);
     const { data } = await axios.post('/auth/login', { username, password });
     await keytar.setPassword('tb-token', config.baseURL.host, data.token);
     await keytar.setPassword('tb-refresh-token', config.baseURL.host, data.refreshToken);
@@ -294,7 +297,7 @@ const restore = async (dir: string, options: string[]) => {
                     delete widgetType.createdTime;
                     delete widgetType.tenantId;
                     await api.saveWidgetType(widgetType);
-                  })
+                  });
                 } catch (e) {}
               }
             });
@@ -564,11 +567,11 @@ program
   });
 
 program
-  .command('login <username> <password>')
+  .command('login')
   .description('Login to ThingsBoard')
-  .action(async (username: string, password: string) => {
+  .action(async () => {
     getBaseURL();
-    await login(username, password);
+    await login();
   });
 
 program
