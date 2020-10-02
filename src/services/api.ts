@@ -23,6 +23,8 @@ export const getRuleChainById = (id: string) => axios.get(`/ruleChain/${id}/meta
 export const getWidgetBundles = () => axios.get('/widgetsBundles');
 export const getWidgetBundlesData = (alias: string, isSystem: boolean) =>
   axios.get(`widgetTypes?isSystem=${isSystem}&bundleAlias=${alias}`);
+export const saveWidgetsBundle = (widgetsBundle: any) => axios.post('widgetsBundle', widgetsBundle);
+export const saveWidgetType = (widgetType: any) => axios.post('widgetType', widgetType);
 
 // Dashboards
 export const getDashboards = (params: GetListParams = DEFAULT_GET_LIST_PARAMS) =>

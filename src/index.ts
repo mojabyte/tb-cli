@@ -264,6 +264,46 @@ const restore = async (dir: string, options: string[]) => {
     }
   }
 
+  // Restore Widgets
+  if (restoreAll || options.includes('widgets')) {
+    const widgetsDir = path.join(dir, 'widgets');
+    if (!fs.existsSync(widgetsDir)) {
+      console.log('Input directory does not contain any "widgets/" directory.');
+      process.exit(1);
+    }
+
+    fs.readdir(widgetsDir, (err, files) => {
+      if (err) console.log(err);
+      else {
+        files.forEach(file => {
+          const filePath = path.join(widgetsDir, file);
+          if (fs.lstatSync(filePath).isFile()) {
+            fs.readFile(filePath, 'utf-8', async (err, content) => {
+              if (err) console.log(err);
+              else {
+                try {
+                  const widgetTypes = JSON.parse(content);
+                  const widgetsBundleName = file.split('.').slice(0, -1).join('.');
+                  await api.saveWidgetsBundle({
+                    alias: widgetsBundleName.toLowerCase(),
+                    image: null,
+                    title: widgetsBundleName,
+                  });
+                  widgetTypes.forEach(async (widgetType: any) => {
+                    delete widgetType.id;
+                    delete widgetType.createdTime;
+                    delete widgetType.tenantId;
+                    await api.saveWidgetType(widgetType);
+                  })
+                } catch (e) {}
+              }
+            });
+          }
+        });
+      }
+    });
+  }
+
   // Restore Devices
   if (restoreAll || options.includes('devices')) {
     const devicesDir = path.join(dir, 'devices');
@@ -276,10 +316,10 @@ const restore = async (dir: string, options: string[]) => {
       if (err) console.log(err);
       else {
         files.forEach(file => {
-          try {
-            fs.readFile(path.join(devicesDir, file), 'utf-8', async (err, content) => {
-              if (err) console.log(err);
-              else {
+          fs.readFile(path.join(devicesDir, file), 'utf-8', async (err, content) => {
+            if (err) console.log(err);
+            else {
+              try {
                 const device = JSON.parse(content);
                 const deviceName = file.split('.').slice(0, -1).join('.');
 
@@ -342,9 +382,9 @@ const restore = async (dir: string, options: string[]) => {
                     getAttributesObject(device.attributes.client)
                   );
                 }
-              }
-            });
-          } catch (e) {}
+              } catch (e) {}
+            }
+          });
         });
       }
     });
