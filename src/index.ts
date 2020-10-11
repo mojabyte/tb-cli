@@ -6,6 +6,7 @@ import keytar from 'keytar';
 import fs from 'fs';
 import { program } from 'commander';
 import path from 'path';
+import https from 'https';
 import * as api from './services/api';
 import { prompt } from './utils/prompt';
 
@@ -32,14 +33,20 @@ const getBaseURL = () => {
   try {
     config.baseURL = new URL('/api', config.baseURL);
     axios.defaults.baseURL = config.baseURL.toString();
+    if (config.insecure) {
+      axios.defaults.httpsAgent = new https.Agent({ rejectUnauthorized: false });
+    }
   } catch (e) {
     console.log("error: ThingsBoard URL is not set. set it by 'tb set-url <url>'");
     process.exit(1);
   }
 };
 
-const setBaseUrl = async (url: string) => {
+const setBaseUrl = async (url: string, insecure: boolean) => {
   let tbData = { status: 0, message: '' };
+  if (insecure) {
+    axios.defaults.httpsAgent = new https.Agent({ rejectUnauthorized: false });
+  }
   try {
     const { data } = await axios.get(`${url}/api`);
     tbData = data;
@@ -51,8 +58,10 @@ const setBaseUrl = async (url: string) => {
     process.exit(1);
   }
   config.baseURL = url;
+  if (insecure) config.insecure = true;
   fs.writeFileSync(configFilePath, JSON.stringify(config));
   config.baseURL = new URL('/api', url);
+  console.log(`URL set successfully to "${url}"`)
 };
 
 const setToken = (token: string) => {
@@ -152,25 +161,24 @@ const backup = async (output: string) => {
   const { data: widgetBundles } = await api.getWidgetBundles();
 
   widgetBundles.forEach(async (widgetBundle: any) => {
-    const { data: widgetBundleData } = await api.getWidgetBundlesData(
-      widgetBundle.alias,
-      account.tenantId !== widgetBundle.tenantId.id
-    );
-    fs.writeFile(
-      `${dir}/widgets/${widgetBundle.title}.json`,
-      JSON.stringify(widgetBundleData),
-      (err: any) => {
-        if (err) throw err;
-      }
-    );
+    if (account.tenantId === widgetBundle.tenantId.id) {
+      const { data: widgetBundleData } = await api.getWidgetBundlesData(widgetBundle.alias);
+      fs.writeFile(
+        `${dir}/widgets/${widgetBundle.title}.json`,
+        JSON.stringify(widgetBundleData),
+        (err: any) => {
+          if (err) throw err;
+        }
+      );
 
-    const widgetsDir = `${dir}/widgets/${widgetBundle.title}`;
-    fs.mkdirSync(widgetsDir);
-    widgetBundleData.forEach((widget: any) => {
-      fs.writeFile(`${widgetsDir}/${widget.name}.json`, JSON.stringify(widget), (err: any) => {
-        if (err) throw err;
+      const widgetsDir = `${dir}/widgets/${widgetBundle.title}`;
+      fs.mkdirSync(widgetsDir);
+      widgetBundleData.forEach((widget: any) => {
+        fs.writeFile(`${widgetsDir}/${widget.name}.json`, JSON.stringify(widget), (err: any) => {
+          if (err) throw err;
+        });
       });
-    });
+    }
   });
 
   // Backup Dashboards
@@ -245,8 +253,6 @@ const backup = async (output: string) => {
 };
 
 const restore = async (dir: string, options: string[]) => {
-  const restoreAll = options.length === 0;
-
   if (!dir) {
     console.log(
       'Input directory does not specified. Please ensure to pass the input directory by "-i <directory>".'
@@ -258,8 +264,8 @@ const restore = async (dir: string, options: string[]) => {
     process.exit(1);
   }
 
-  // Restore Dashboards
-  if (restoreAll || options.includes('dashboards')) {
+  // TODO: Restore Dashboards
+  if (options.includes('dashboards')) {
     const dashboardsDir = path.join(dir, 'dashboards');
     if (!fs.existsSync(dashboardsDir)) {
       console.log('Input directory does not contain any "dashboards/" directory.');
@@ -267,8 +273,10 @@ const restore = async (dir: string, options: string[]) => {
     }
   }
 
+  // TODO: Restore Rule Chains
+
   // Restore Widgets
-  if (restoreAll || options.includes('widgets')) {
+  if (options.includes('widgets')) {
     const widgetsDir = path.join(dir, 'widgets');
     if (!fs.existsSync(widgetsDir)) {
       console.log('Input directory does not contain any "widgets/" directory.');
@@ -308,7 +316,7 @@ const restore = async (dir: string, options: string[]) => {
   }
 
   // Restore Devices
-  if (restoreAll || options.includes('devices')) {
+  if (options.includes('devices')) {
     const devicesDir = path.join(dir, 'devices');
     if (!fs.existsSync(devicesDir)) {
       console.log('Input directory does not contain any "devices/" directory.');
@@ -452,7 +460,7 @@ const label = async (dashboardName: string, deviceName: string) => {
   const device = devices[0];
 
   const { data: attributes } = await api.getDeviceAttributes(device.id.id, ['LABELS']);
-  const labels = JSON.parse(attributes[0].value);
+  const labels = attributes[0].value;
 
   const { data: dashboardData } = await api.getDashboardById(dashboard.id.id);
 
@@ -461,8 +469,10 @@ const label = async (dashboardName: string, deviceName: string) => {
   Object.keys(widgets).forEach(widgetID => {
     const widget = widgets[widgetID];
     if (widget.type === 'rpc') {
-      const { valueKey, valueAttribute } = widget.config.settings;
-      widget.config.title = labels[valueKey || valueAttribute];
+      const { valueKey, valueAttribute, method } = widget.config.settings;
+      widget.config.showTitle = false;
+      widget.config.settings.title =
+        labels[valueKey || valueAttribute || method] ?? widget.config.settings.title;
     } else if (widget.type === 'latest' || 'timeseries') {
       if (widget.config.datasources.length === 1) {
         widget.config.title =
@@ -562,8 +572,9 @@ const convert = async (input: string, output: string) => {
 program
   .command('set-url <url>')
   .description('Set ThingsBoard URL')
-  .action(async (url: string) => {
-    setBaseUrl(url);
+  .option('-k, --insecure', 'Allow insecure server connections when using SSL')
+  .action(async (url: string, cmdObj?: any) => {
+    setBaseUrl(url, cmdObj.insecure);
   });
 
 program
@@ -595,16 +606,18 @@ program
 program
   .command('restore')
   .option('-i, --input <directory>', 'Directory to restore data from')
-  .option('-d, --dashboards', 'Restore dashboards')
+  .option('-b, --dashboards', 'Restore dashboards')
   .option('-r, --rulechains', 'Restore rule chains')
   .option('-w, --widgets', 'Restore widgets')
   .option('-d, --devices', 'Restore devices')
   .description('Restore backup data')
   .action(async (cmdObj: any) => {
-    let options = ['dashboards', 'rulechains', 'widgets', 'devices'];
-    options.forEach(option => {
-      if (cmdObj[option]) options.filter(e => e !== option);
+    const ALL_OPTIONS = ['dashboards', 'rulechains', 'widgets', 'devices'];
+    let options: string[] = [];
+    ALL_OPTIONS.forEach(option => {
+      if (cmdObj[option]) options.push(option);
     });
+    options = options.length > 0 ? options : ALL_OPTIONS;
 
     getBaseURL();
     await auth();

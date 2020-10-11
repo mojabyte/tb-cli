@@ -21,7 +21,7 @@ export const getRuleChainById = (id: string) => axios.get(`/ruleChain/${id}/meta
 
 // Widgets
 export const getWidgetBundles = () => axios.get('/widgetsBundles');
-export const getWidgetBundlesData = (alias: string, isSystem: boolean) =>
+export const getWidgetBundlesData = (alias: string, isSystem: boolean = false) =>
   axios.get(`widgetTypes?isSystem=${isSystem}&bundleAlias=${alias}`);
 export const saveWidgetsBundle = (widgetsBundle: any) => axios.post('widgetsBundle', widgetsBundle);
 export const saveWidgetType = (widgetType: any) => axios.post('widgetType', widgetType);
@@ -45,8 +45,11 @@ export const saveDeviceCredentials = (credentials: any) =>
   axios.post('/device/credentials', credentials);
 
 // Attributes
-export const getDeviceAttributesByScope = (id: string, scope: AttributesScope) =>
-  axios.get(`/plugins/telemetry/DEVICE/${id}/values/attributes/${scope}`);
+export const getDeviceAttributesByScope = (
+  id: string,
+  scope: AttributesScope,
+  keys: string[] = []
+) => axios.get(`/plugins/telemetry/DEVICE/${id}/values/attributes/${scope}?keys=${keys.join(',')}`);
 export const getDeviceAttributes = (id: string, keys: string[] = []) =>
   axios.get(`/plugins/telemetry/DEVICE/${id}/values/attributes?keys=${keys.join(',')}`);
 export const saveDeviceAttributes = (id: string, scope: AttributesScope, attributes: any) =>
