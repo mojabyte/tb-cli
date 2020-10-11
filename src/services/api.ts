@@ -55,3 +55,7 @@ export const getDeviceAttributes = (id: string, keys: string[] = []) =>
   axios.get(`/plugins/telemetry/DEVICE/${id}/values/attributes?keys=${keys.join(',')}`);
 export const saveDeviceAttributes = (id: string, scope: AttributesScope, attributes: any) =>
   axios.post(`/plugins/telemetry/${id}/${scope}`, attributes);
+
+// Customers
+export const getCustomers = (params: GetListParams = DEFAULT_GET_LIST_PARAMS) =>
+  axios.get('/customers', { params: { page: 0, ...params } });

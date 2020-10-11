@@ -434,6 +434,23 @@ const restore = async (dir: string, options: string[]) => {
                   })
                 );
 
+                if (dashboard.assignedCustomers) {
+                  await Promise.all(
+                    dashboard.assignedCustomers.map(async (
+                      { title }: { title: string },
+                      index: number
+                    ) => {
+                      const { data: { data: customers } }
+                        = await api.getCustomers({ pageSize: 1, textSearch: title });
+                      if (customers[0]) {
+                        dashboard.assignedCustomers[index].customerId.id = customers[0].id.id;
+                        return;
+                      }
+                      dashboard.assignedCustomers.splice(index, 1);
+                    })
+                  );
+                }
+
                 await api.saveDashboard(dashboard);
               } catch (e) {}
             }
