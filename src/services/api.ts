@@ -30,6 +30,7 @@ export const saveWidgetType = (widgetType: any) => axios.post('widgetType', widg
 export const getDashboards = (params: GetListParams = DEFAULT_GET_LIST_PARAMS) =>
   axios.get('/tenant/dashboards', { params: { page: 0, ...params } });
 export const getDashboardById = (id: string) => axios.get(`/dashboard/${id}`);
+export const saveDashboard = (dashboard: any) => axios.post('/dashboard', dashboard);
 
 // Devices
 export const getDevices = (params: GetListParams = DEFAULT_GET_LIST_PARAMS) =>

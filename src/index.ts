@@ -128,6 +128,7 @@ const logout = async () => {
   await keytar.deletePassword('tb-refresh-token', config.baseURL.host);
 };
 
+// TODO: backup use export/download API
 const backup = async (output: string) => {
   const baseDir = output || './backups';
   const dir = `${baseDir}/${config.baseURL.host}/${moment()
@@ -264,15 +265,6 @@ const restore = async (dir: string, options: string[]) => {
     process.exit(1);
   }
 
-  // TODO: Restore Dashboards
-  if (options.includes('dashboards')) {
-    const dashboardsDir = path.join(dir, 'dashboards');
-    if (!fs.existsSync(dashboardsDir)) {
-      console.log('Input directory does not contain any "dashboards/" directory.');
-      process.exit(1);
-    }
-  }
-
   // TODO: Restore Rule Chains
 
   // Restore Widgets
@@ -393,6 +385,56 @@ const restore = async (dir: string, options: string[]) => {
                     getAttributesObject(device.attributes.client)
                   );
                 }
+              } catch (e) {}
+            }
+          });
+        });
+      }
+    });
+  }
+
+  // Restore Dashboards
+  if (options.includes('dashboards')) {
+    const dashboardsDir = path.join(dir, 'dashboards');
+    if (!fs.existsSync(dashboardsDir)) {
+      console.log('Input directory does not contain any "dashboards/" directory.');
+      process.exit(1);
+    }
+
+    fs.readdir(dashboardsDir, (err, files) => {
+      if (err) console.log(err);
+      else {
+        files.forEach(file => {
+          fs.readFile(path.join(dashboardsDir, file), 'utf-8', async (err, content) => {
+            if (err) console.log(err);
+            else {
+              try {
+                const dashboard = JSON.parse(content);
+                delete dashboard.id;
+                delete dashboard.createdTime;
+                delete dashboard.tenantId;
+
+                // TODO: restore entity alias by entity id & for any entity type
+                await Promise.all(
+                  Object.keys(dashboard.configuration.entityAliases).map(async key => {
+                    if (
+                      dashboard.configuration.entityAliases[key].filter.type === 'singleEntity'
+                      && dashboard.configuration.entityAliases[key].filter.singleEntity.entityType
+                        === 'DEVICE'
+                    ) {
+                      const deviceName = dashboard.configuration.entityAliases[key].alias;
+                      const { data: { data: devices } }
+                        = await api.getDevices({ pageSize: 1, textSearch: deviceName });
+                      if (devices[0]) {
+                        dashboard.configuration.entityAliases[key].filter.singleEntity.id
+                          = devices[0].id.id;
+                        return;
+                      }
+                    }
+                  })
+                );
+
+                await api.saveDashboard(dashboard);
               } catch (e) {}
             }
           });
@@ -612,15 +654,13 @@ program
   .option('-d, --devices', 'Restore devices')
   .description('Restore backup data')
   .action(async (cmdObj: any) => {
-    const ALL_OPTIONS = ['dashboards', 'rulechains', 'widgets', 'devices'];
-    let options: string[] = [];
-    ALL_OPTIONS.forEach(option => {
-      if (cmdObj[option]) options.push(option);
-    });
-    options = options.length > 0 ? options : ALL_OPTIONS;
-
     getBaseURL();
     await auth();
+
+    const ALL_OPTIONS = ['dashboards', 'rulechains', 'widgets', 'devices'];
+    let options = ALL_OPTIONS.filter(option => cmdObj[option]);
+    options = options.length > 0 ? options : ALL_OPTIONS;
+
     await restore(cmdObj.input, options);
   });
 
