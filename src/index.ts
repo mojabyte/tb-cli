@@ -20,11 +20,12 @@ const configFilePath: string = path.join(
 );
 
 const readConfigFile = () => {
-  let configFile = '{}';
   try {
-    configFile = fs.readFileSync(configFilePath, { encoding: 'utf8' });
-  } catch (e) {}
-  return JSON.parse(configFile);
+    const configFile = fs.readFileSync(configFilePath, { encoding: 'utf8' });
+    return JSON.parse(configFile);
+  } catch (e) {
+    return {};
+  }
 };
 
 const config = readConfigFile();
@@ -90,30 +91,30 @@ const auth = async () => {
           setToken(data.token);
         } catch (e) {
           console.log(
-            'There is a problem to refresh your token. Please login again by "tb login <username> <password>"'
+            'There is a problem to refresh your token. Please login again by "tb login"'
           );
           process.exit(1);
         }
       } else {
         await logout();
-        console.log('Login token expired. Please login again by "tb login <username> <password>"');
+        console.log('Login token expired. Please login again by "tb login"');
         process.exit(1);
       }
     } else {
       await logout();
-      console.log('Login token expired. Please login again by "tb login <username> <password>"');
+      console.log('Login token expired. Please login again by "tb login"');
       process.exit(1);
     }
   } else {
-    console.log('You are not logged in. Please login by "tb login <username> <password>"');
+    console.log('You are not logged in. Please login by "tb login"');
     process.exit(1);
   }
 };
 
 const login = async () => {
   try {
-    const username = await prompt('Username : ');
-    const password = await prompt('Password : ', true);
+    const username = await prompt('Username: ');
+    const password = await prompt('Password: ', true);
     const { data } = await axios.post('/auth/login', { username, password });
     await keytar.setPassword('tb-token', config.baseURL.host, data.token);
     await keytar.setPassword('tb-refresh-token', config.baseURL.host, data.refreshToken);
@@ -682,7 +683,6 @@ program
   });
 
 program
-  .passCommandToAction(false)
   .storeOptionsAsProperties(false)
   .command('clone <dashboardName> <deviceName>')
   .option('-n, --name <name>', 'Name of Cloned Dashboard')
