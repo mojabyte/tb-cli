@@ -4,9 +4,11 @@ import jwtDecode from 'jwt-decode';
 import moment from 'moment';
 import keytar from 'keytar';
 import fs from 'fs';
+import fsPromise from 'fs/promises';
 import { program } from 'commander';
 import path from 'path';
 import https from 'https';
+import git from 'isomorphic-git';
 import * as api from './services/api';
 import { prompt } from './utils/prompt';
 
@@ -62,7 +64,7 @@ const setBaseUrl = async (url: string, insecure: boolean) => {
   if (insecure) config.insecure = true;
   fs.writeFileSync(configFilePath, JSON.stringify(config));
   config.baseURL = new URL('/api', url);
-  console.log(`URL set successfully to "${url}"`)
+  console.log(`URL set successfully to "${url}"`);
 };
 
 const setToken = (token: string) => {
@@ -90,9 +92,7 @@ const auth = async () => {
           await keytar.setPassword('tb-refresh-token', config.baseURL.host, data.refreshToken);
           setToken(data.token);
         } catch (e) {
-          console.log(
-            'There is a problem to refresh your token. Please login again by "tb login"'
-          );
+          console.log('There is a problem to refresh your token. Please login again by "tb login"');
           process.exit(1);
         }
       } else {
@@ -129,129 +129,222 @@ const logout = async () => {
   await keytar.deletePassword('tb-refresh-token', config.baseURL.host);
 };
 
+// TODO: backup all tenants data -> login and act as sysadmin
 // TODO: backup use export/download API
 const backup = async (output: string) => {
-  const baseDir = output || './backups';
-  const dir = `${baseDir}/${config.baseURL.host}/${moment()
-    .format('YY-MM-DD HH:mm:ss')
-    .replace(/[^0-9]/g, '')}`;
+  let baseDir = output || './backups';
+  baseDir = path.join(baseDir, config.baseURL.host);
 
-  fs.mkdirSync(dir, { recursive: true });
-  fs.mkdirSync(`${dir}/ruleChains`);
-  fs.mkdirSync(`${dir}/widgets`);
-  fs.mkdirSync(`${dir}/dashboards`);
-  fs.mkdirSync(`${dir}/devices`);
+  await fsPromise.mkdir(baseDir, { recursive: true });
+
+  const dirs = ['ruleChains', 'widgets', 'dashboards', 'devices'];
+
+  await Promise.all(
+    dirs.map(
+      dir =>
+        new Promise<void>((resolve, reject) => {
+          const currentDir = path.join(baseDir, dir);
+          fsPromise
+            .rm(currentDir, { recursive: true, force: true })
+            .then(() => {
+              fsPromise.mkdir(currentDir).then(resolve);
+            })
+            .catch(reject);
+        })
+    )
+  );
+
+  const gitRoot = await git.findRoot({ fs, filepath: baseDir });
+  if (gitRoot !== baseDir) {
+    await git.init({ fs, dir: baseDir });
+
+    // TODO: get git configs from user
+    await git.setConfig({ fs, dir: baseDir, path: 'user.name', value: 'Hassan Mojab' });
+    await git.setConfig({ fs, dir: baseDir, path: 'user.email', value: 'mh_mojab75@yahoo.com' });
+
+    await fsPromise.copyFile('./src/data/.gitignore', path.join(baseDir, '.gitignore'));
+  }
 
   // Backup Rule Chains
-  const {
-    data: { data: ruleChains },
-  } = await api.getRuleChains();
+  const backupRuleChain = (ruleChain: any) =>
+    new Promise<void>((resolve, reject) => {
+      api
+        .getRuleChainById(ruleChain.id.id)
+        .then(({ data: ruleChainData }) => {
+          fsPromise
+            .writeFile(
+              path.join(baseDir, 'ruleChains', `${ruleChain.name}.json`),
+              JSON.stringify(ruleChainData, undefined, 2)
+            )
+            .then(resolve);
+        })
+        .catch(e => {
+          console.log(e);
+          reject(e);
+        });
+    });
 
-  ruleChains.forEach(async (ruleChain: any) => {
-    const { data: ruleChainData } = await api.getRuleChainById(ruleChain.id.id);
-    fs.writeFile(
-      `${dir}/ruleChains/${ruleChain.name}.json`,
-      JSON.stringify(ruleChainData),
-      (err: any) => {
-        if (err) throw err;
-        // console.log(`Rule "${ruleChain.name}" Saved!`);
-      }
-    );
+  const backupRuleChains = new Promise<void>((resolve, reject) => {
+    console.log('Backup Rule Chains...');
+    api
+      .getRuleChains()
+      .then(({ data: { data: ruleChains } }) => {
+        Promise.all(ruleChains.map(backupRuleChain)).then(() => {
+          console.log('Rule Chains backup completed!');
+          resolve();
+        });
+      })
+      .catch(e => {
+        console.log(e);
+        reject(e);
+      });
   });
 
   // Backup widgets
-  const { data: widgetBundles } = await api.getWidgetBundles();
-
-  widgetBundles.forEach(async (widgetBundle: any) => {
-    if (account.tenantId === widgetBundle.tenantId.id) {
-      const { data: widgetBundleData } = await api.getWidgetBundlesData(widgetBundle.alias);
-      fs.writeFile(
-        `${dir}/widgets/${widgetBundle.title}.json`,
-        JSON.stringify(widgetBundleData),
-        (err: any) => {
-          if (err) throw err;
-        }
-      );
-
-      const widgetsDir = `${dir}/widgets/${widgetBundle.title}`;
-      fs.mkdirSync(widgetsDir);
-      widgetBundleData.forEach((widget: any) => {
-        fs.writeFile(`${widgetsDir}/${widget.name}.json`, JSON.stringify(widget), (err: any) => {
-          if (err) throw err;
+  const backupWidgetBundle = (widgetBundle: any) =>
+    new Promise<void>((resolve, reject) => {
+      api
+        .getWidgetBundlesData(widgetBundle.alias)
+        .then(({ data: widgetBundleData }) => {
+          fsPromise
+            .writeFile(
+              path.join(baseDir, 'widgets', `${widgetBundle.title}.json`),
+              JSON.stringify(widgetBundleData, undefined, 2)
+            )
+            .then(resolve);
+        })
+        .catch(e => {
+          console.log(e);
+          reject(e);
         });
+    });
+
+  const backupWidgets = new Promise<void>((resolve, reject) => {
+    console.log('Backup Widgets...');
+    api
+      .getWidgetBundles()
+      .then(({ data: widgetBundles }) => {
+        Promise.all(
+          widgetBundles
+            .filter((widgetBundle: any) => account.tenantId === widgetBundle.tenantId.id)
+            .map(backupWidgetBundle)
+        ).then(() => {
+          console.log('Widgets backup completed!');
+          resolve();
+        });
+      })
+      .catch(e => {
+        console.log(e);
+        reject(e);
       });
-    }
   });
 
   // Backup Dashboards
-  const {
-    data: { data: dashboards },
-  } = await api.getDashboards();
+  const backupDashboard = (dashboard: any) =>
+    new Promise<void>((resolve, reject) => {
+      api
+        .getDashboardById(dashboard.id.id)
+        .then(({ data: dashboardData }) => {
+          fsPromise
+            .writeFile(
+              path.join(baseDir, 'dashboards', `${dashboard.name}.json`),
+              JSON.stringify(dashboardData, undefined, 2)
+            )
+            .then(resolve);
+        })
+        .catch(e => {
+          console.log(e);
+          reject(e);
+        });
+    });
 
-  dashboards.forEach(async (dashboard: any) => {
-    const { data: dashboardData } = await api.getDashboardById(dashboard.id.id);
-    fs.writeFile(
-      `${dir}/dashboards/${dashboard.name}.json`,
-      JSON.stringify(dashboardData),
-      (err: any) => {
-        if (err) throw err;
-      }
-    );
+  const backupDashboards = new Promise<void>((resolve, reject) => {
+    console.log('Backup Dashboards...');
+    api
+      .getDashboards()
+      .then(({ data: { data: dashboards } }) => {
+        Promise.all(dashboards.map(backupDashboard)).then(() => {
+          console.log('Dashboards backup completed!');
+          resolve();
+        });
+      })
+      .catch(e => {
+        console.log(e);
+        reject(e);
+      });
   });
 
   // TODO: backup device data
   // Backup device attributes & access-tokens
-  const {
-    data: { data: devices },
-  } = await api.getDevices();
+  const backupDevice = (device: any) =>
+    new Promise<void>((resolve, reject) => {
+      const deviceId = device.id.id;
+      Promise.all([
+        api.getDeviceAttributesByScope(deviceId, 'SERVER_SCOPE'),
+        api.getDeviceAttributesByScope(deviceId, 'SHARED_SCOPE'),
+        api.getDeviceAttributesByScope(deviceId, 'CLIENT_SCOPE'),
+        api.getDeviceCredentials(deviceId),
+      ]).then(
+        ([
+          { data: serverAttributes },
+          { data: sharedAttributes },
+          { data: clientAttributes },
+          { data: credentials },
+        ]) => {
+          serverAttributes.forEach((item: any) => {
+            delete item.lastUpdateTs;
+          });
+          sharedAttributes.forEach((item: any) => {
+            delete item.lastUpdateTs;
+          });
+          clientAttributes.forEach((item: any) => {
+            delete item.lastUpdateTs;
+          });
 
-  devices.forEach(async (device: any) => {
-    const deviceId = device.id.id;
-    const { data: serverAttributes } = await api.getDeviceAttributesByScope(
-      deviceId,
-      'SERVER_SCOPE'
-    );
-    serverAttributes.forEach((item: any) => {
-      delete item.lastUpdateTs;
+          const attributes = {
+            server: serverAttributes,
+            shared: sharedAttributes,
+            client: clientAttributes,
+          };
+
+          const accessToken = credentials.credentialsId;
+
+          fsPromise
+            .writeFile(
+              path.join(baseDir, 'devices', `${device.name}.json`),
+              JSON.stringify({ accessToken, attributes }, undefined, 2)
+            )
+            .then(resolve);
+        }
+      );
     });
 
-    const { data: sharedAttributes } = await api.getDeviceAttributesByScope(
-      deviceId,
-      'SHARED_SCOPE'
-    );
-    sharedAttributes.forEach((item: any) => {
-      delete item.lastUpdateTs;
-    });
-
-    const { data: clientAttributes } = await api.getDeviceAttributesByScope(
-      deviceId,
-      'CLIENT_SCOPE'
-    );
-    clientAttributes.forEach((item: any) => {
-      delete item.lastUpdateTs;
-    });
-
-    const attributes = {
-      server: serverAttributes,
-      shared: sharedAttributes,
-      client: clientAttributes,
-    };
-
-    const { data: credentials } = await api.getDeviceCredentials(deviceId);
-
-    const accessToken = credentials.credentialsId;
-
-    fs.writeFile(
-      `${dir}/devices/${device.name}.json`,
-      JSON.stringify({
-        accessToken,
-        attributes,
-      }),
-      (err: any) => {
-        if (err) throw err;
-      }
-    );
+  const backupDevices = new Promise<void>((resolve, reject) => {
+    console.log('Backup Devices...');
+    api
+      .getDevices()
+      .then(({ data: { data: devices } }) => {
+        Promise.all(devices.map(backupDevice)).then(() => {
+          console.log('Devices backup completed!');
+          resolve();
+        });
+      })
+      .catch(e => {
+        console.log(e);
+        reject(e);
+      });
   });
+
+  await Promise.all([backupRuleChains, backupWidgets, backupDashboards, backupDevices]);
+
+  git.add({ fs, dir: baseDir, filepath: '.' });
+  git.commit({
+    fs,
+    dir: baseDir,
+    message: `backup ${moment().format('DD-MM-YYYY HH:mm')}`,
+  });
+
+  console.log('done!');
 };
 
 const restore = async (dir: string, options: string[]) => {
@@ -276,36 +369,35 @@ const restore = async (dir: string, options: string[]) => {
       process.exit(1);
     }
 
-    fs.readdir(widgetsDir, (err, files) => {
-      if (err) console.log(err);
-      else {
+    fsPromise
+      .readdir(widgetsDir)
+      .then(files => {
         files.forEach(file => {
           const filePath = path.join(widgetsDir, file);
           if (fs.lstatSync(filePath).isFile()) {
-            fs.readFile(filePath, 'utf-8', async (err, content) => {
-              if (err) console.log(err);
-              else {
-                try {
-                  const widgetTypes = JSON.parse(content);
-                  const widgetsBundleName = file.split('.').slice(0, -1).join('.');
-                  await api.saveWidgetsBundle({
-                    alias: widgetsBundleName.toLowerCase(),
-                    image: null,
-                    title: widgetsBundleName,
-                  });
-                  widgetTypes.forEach(async (widgetType: any) => {
-                    delete widgetType.id;
-                    delete widgetType.createdTime;
-                    delete widgetType.tenantId;
-                    await api.saveWidgetType(widgetType);
-                  });
-                } catch (e) {}
-              }
+            fsPromise.readFile(filePath, 'utf-8').then(async content => {
+              try {
+                const widgetTypes = JSON.parse(content);
+                const widgetsBundleName = file.split('.').slice(0, -1).join('.');
+                await api.saveWidgetsBundle({
+                  alias: widgetsBundleName.toLowerCase(),
+                  image: null,
+                  title: widgetsBundleName,
+                });
+                widgetTypes.forEach(async (widgetType: any) => {
+                  delete widgetType.id;
+                  delete widgetType.createdTime;
+                  delete widgetType.tenantId;
+                  await api.saveWidgetType(widgetType);
+                });
+              } catch (e) {}
             });
           }
         });
-      }
-    });
+      })
+      .catch(e => {
+        console.log(e);
+      });
   }
 
   // Restore Devices
@@ -316,82 +408,81 @@ const restore = async (dir: string, options: string[]) => {
       process.exit(1);
     }
 
-    fs.readdir(devicesDir, (err, files) => {
-      if (err) console.log(err);
-      else {
+    fsPromise
+      .readdir(devicesDir)
+      .then(files => {
         files.forEach(file => {
-          fs.readFile(path.join(devicesDir, file), 'utf-8', async (err, content) => {
-            if (err) console.log(err);
-            else {
+          fsPromise.readFile(path.join(devicesDir, file), 'utf-8').then(async content => {
+            try {
+              const device = JSON.parse(content);
+              const deviceName = file.split('.').slice(0, -1).join('.');
+
+              let deviceId = null;
+
               try {
-                const device = JSON.parse(content);
-                const deviceName = file.split('.').slice(0, -1).join('.');
+                const { data } = await api.saveDevice(
+                  {
+                    name: deviceName,
+                    type: 'AT_CORE',
+                  },
+                  device.accessToken
+                );
+                deviceId = data.id.id;
+              } catch (e) {
+                // If device already exists just restore its accessToke
+                if (e.response?.data?.errorCode === 31) {
+                  const {
+                    data: { data: devices },
+                  } = await api.getDevices({ pageSize: 1, textSearch: deviceName });
+                  deviceId = devices[0].id.id;
+                  try {
+                    const { data: credentials } = await api.getDeviceCredentials(deviceId);
+                    await api.saveDeviceCredentials({
+                      ...credentials,
+                      credentialsId: device.accessToken,
+                    });
+                  } catch (e) {
+                    console.log(e.response?.data?.message);
+                  }
+                } else console.log(e.response?.data?.message);
+              }
 
-                let deviceId = null;
+              const getAttributesObject = (attributesArray: any[]) => {
+                const attributesObject: any = {};
+                attributesArray.forEach(({ key, value }: { key: string; value: any }) => {
+                  attributesObject[key] = value;
+                });
+                return attributesObject;
+              };
 
-                try {
-                  const { data } = await api.saveDevice(
-                    {
-                      name: deviceName,
-                      type: 'AT_CORE',
-                    },
-                    device.accessToken
-                  );
-                  deviceId = data.id.id;
-                } catch (e) {
-                  // If device already exists just restore its accessToke
-                  if (e.response?.data?.errorCode === 31) {
-                    const {
-                      data: { data: devices },
-                    } = await api.getDevices({ pageSize: 1, textSearch: deviceName });
-                    deviceId = devices[0].id.id;
-                    try {
-                      const { data: credentials } = await api.getDeviceCredentials(deviceId);
-                      await api.saveDeviceCredentials({
-                        ...credentials,
-                        credentialsId: device.accessToken,
-                      });
-                    } catch (e) {
-                      console.log(e.response?.data?.message);
-                    }
-                  } else console.log(e.response?.data?.message);
-                }
-
-                const getAttributesObject = (attributesArray: any[]) => {
-                  const attributesObject: any = {};
-                  attributesArray.forEach(({ key, value }: { key: string; value: any }) => {
-                    attributesObject[key] = value;
-                  });
-                  return attributesObject;
-                };
-
-                if (device.attributes.server.length > 0) {
-                  await api.saveDeviceAttributes(
-                    deviceId,
-                    'SERVER_SCOPE',
-                    getAttributesObject(device.attributes.server)
-                  );
-                }
-                if (device.attributes.shared.length > 0) {
-                  await api.saveDeviceAttributes(
-                    deviceId,
-                    'SHARED_SCOPE',
-                    getAttributesObject(device.attributes.shared)
-                  );
-                }
-                if (device.attributes.client.length > 0) {
-                  await api.saveDeviceAttributes(
-                    deviceId,
-                    'CLIENT_SCOPE',
-                    getAttributesObject(device.attributes.client)
-                  );
-                }
-              } catch (e) {}
-            }
+              if (device.attributes.server.length > 0) {
+                await api.saveDeviceAttributes(
+                  deviceId,
+                  'SERVER_SCOPE',
+                  getAttributesObject(device.attributes.server)
+                );
+              }
+              if (device.attributes.shared.length > 0) {
+                await api.saveDeviceAttributes(
+                  deviceId,
+                  'SHARED_SCOPE',
+                  getAttributesObject(device.attributes.shared)
+                );
+              }
+              if (device.attributes.client.length > 0) {
+                await api.saveDeviceAttributes(
+                  deviceId,
+                  'CLIENT_SCOPE',
+                  getAttributesObject(device.attributes.client)
+                );
+              }
+            } catch (e) {}
           });
         });
-      }
-    });
+      })
+      .catch(e => {
+        console.log(e);
+      });
   }
 
   // Restore Dashboards
@@ -402,63 +493,63 @@ const restore = async (dir: string, options: string[]) => {
       process.exit(1);
     }
 
-    fs.readdir(dashboardsDir, (err, files) => {
-      if (err) console.log(err);
-      else {
+    fsPromise
+      .readdir(dashboardsDir)
+      .then(files => {
         files.forEach(file => {
-          fs.readFile(path.join(dashboardsDir, file), 'utf-8', async (err, content) => {
-            if (err) console.log(err);
-            else {
-              try {
-                const dashboard = JSON.parse(content);
-                delete dashboard.id;
-                delete dashboard.createdTime;
-                delete dashboard.tenantId;
+          fsPromise.readFile(path.join(dashboardsDir, file), 'utf-8').then(async content => {
+            try {
+              const dashboard = JSON.parse(content);
+              delete dashboard.id;
+              delete dashboard.createdTime;
+              delete dashboard.tenantId;
 
-                // TODO: restore entity alias by entity id & for any entity type
-                await Promise.all(
-                  Object.keys(dashboard.configuration.entityAliases).map(async key => {
-                    if (
-                      dashboard.configuration.entityAliases[key].filter.type === 'singleEntity'
-                      && dashboard.configuration.entityAliases[key].filter.singleEntity.entityType
-                        === 'DEVICE'
-                    ) {
-                      const deviceName = dashboard.configuration.entityAliases[key].alias;
-                      const { data: { data: devices } }
-                        = await api.getDevices({ pageSize: 1, textSearch: deviceName });
-                      if (devices[0]) {
-                        dashboard.configuration.entityAliases[key].filter.singleEntity.id
-                          = devices[0].id.id;
-                        return;
-                      }
+              // TODO: restore entity alias by entity id & for any entity type
+              await Promise.all(
+                Object.keys(dashboard.configuration.entityAliases).map(async key => {
+                  if (
+                    dashboard.configuration.entityAliases[key].filter.type === 'singleEntity' &&
+                    dashboard.configuration.entityAliases[key].filter.singleEntity.entityType ===
+                      'DEVICE'
+                  ) {
+                    const deviceName = dashboard.configuration.entityAliases[key].alias;
+                    const {
+                      data: { data: devices },
+                    } = await api.getDevices({ pageSize: 1, textSearch: deviceName });
+                    if (devices[0]) {
+                      dashboard.configuration.entityAliases[key].filter.singleEntity.id =
+                        devices[0].id.id;
+                      return;
                     }
-                  })
-                );
+                  }
+                })
+              );
 
-                if (dashboard.assignedCustomers) {
-                  await Promise.all(
-                    dashboard.assignedCustomers.map(async (
-                      { title }: { title: string },
-                      index: number
-                    ) => {
-                      const { data: { data: customers } }
-                        = await api.getCustomers({ pageSize: 1, textSearch: title });
+              if (dashboard.assignedCustomers) {
+                await Promise.all(
+                  dashboard.assignedCustomers.map(
+                    async ({ title }: { title: string }, index: number) => {
+                      const {
+                        data: { data: customers },
+                      } = await api.getCustomers({ pageSize: 1, textSearch: title });
                       if (customers[0]) {
                         dashboard.assignedCustomers[index].customerId.id = customers[0].id.id;
                         return;
                       }
                       dashboard.assignedCustomers.splice(index, 1);
-                    })
-                  );
-                }
+                    }
+                  )
+                );
+              }
 
-                await api.saveDashboard(dashboard);
-              } catch (e) {}
-            }
+              await api.saveDashboard(dashboard);
+            } catch (e) {}
           });
         });
-      }
-    });
+      })
+      .catch(e => {
+        console.log(e);
+      });
   }
 };
 
@@ -568,65 +659,58 @@ const convert = async (input: string, output: string) => {
   fs.mkdirSync(`${dir}/widgets`);
 
   // Convert Rule Chains
-  fs.readdir(`${input}/ruleChains`, (err, filenames) => {
-    if (err) {
-      throw err;
-    }
-    filenames.forEach(filename => {
-      fs.readFile(`${input}/ruleChains/${filename}`, 'utf-8', (err, content) => {
-        if (err) {
-          throw err;
-        }
-        const ruleChain = JSON.parse(content);
-        delete ruleChain.ruleChainId;
-        ruleChain.nodes.forEach((_node: any, index: number) => {
-          delete ruleChain.nodes[index].id;
-          delete ruleChain.nodes[index].createdTime;
-          delete ruleChain.nodes[index].ruleChainId;
+  fsPromise
+    .readdir(`${input}/ruleChains`)
+    .then(filenames => {
+      filenames.forEach(filename => {
+        fsPromise.readFile(`${input}/ruleChains/${filename}`, 'utf-8').then(content => {
+          const ruleChain = JSON.parse(content);
+          delete ruleChain.ruleChainId;
+          ruleChain.nodes.forEach((_node: any, index: number) => {
+            delete ruleChain.nodes[index].id;
+            delete ruleChain.nodes[index].createdTime;
+            delete ruleChain.nodes[index].ruleChainId;
+          });
+          const convertedRuleChain = {
+            ruleChain: {
+              additionalInfo: null,
+              name: path.parse(filename).name,
+              firstRuleNodeId: null,
+              root: false,
+              debugMode: false,
+              configuration: null,
+            },
+            metadata: ruleChain,
+          };
+          fsPromise.writeFile(`${dir}/ruleChains/${filename}`, JSON.stringify(convertedRuleChain));
         });
-        const convertedRuleChain = {
-          ruleChain: {
-            additionalInfo: null,
-            name: path.parse(filename).name,
-            firstRuleNodeId: null,
-            root: false,
-            debugMode: false,
-            configuration: null,
-          },
-          metadata: ruleChain,
-        };
-        fs.writeFile(
-          `${dir}/ruleChains/${filename}`,
-          JSON.stringify(convertedRuleChain),
-          (err: any) => {
-            if (err) throw err;
-          }
-        );
       });
+    })
+    .catch(e => {
+      throw e;
     });
-  });
 
   // Convert Dashboards
-  fs.readdir(`${input}/dashboards`, (err, filenames) => {
-    if (err) {
-      throw err;
-    }
-    filenames.forEach(filename => {
-      fs.readFile(`${input}/dashboards/${filename}`, 'utf-8', (err, content) => {
-        if (err) {
-          throw err;
-        }
-        const dashboard = JSON.parse(content);
-        delete dashboard.id;
-        delete dashboard.createdTime;
-        delete dashboard.tenantId;
-        delete dashboard.assignedCustomers;
-        fs.writeFile(`${dir}/dashboards/${filename}`, JSON.stringify(dashboard), (err: any) => {
-          if (err) throw err;
+  fsPromise
+    .readdir(`${input}/dashboards`)
+    .then(filenames => {
+      filenames.forEach(filename => {
+        fsPromise.readFile(`${input}/dashboards/${filename}`, 'utf-8').then(content => {
+          const dashboard = JSON.parse(content);
+          delete dashboard.id;
+          delete dashboard.createdTime;
+          delete dashboard.tenantId;
+          delete dashboard.assignedCustomers;
+          fsPromise.writeFile(
+            `${dir}/dashboards/${filename}`,
+            JSON.stringify(dashboard, undefined, 2)
+          );
         });
       });
+    })
+    .catch(e => {
+      throw e;
     });
-  });
 };
 
 program
