@@ -59,3 +59,11 @@ export const saveDeviceAttributes = (id: string, scope: AttributesScope, attribu
 // Customers
 export const getCustomers = (params: GetListParams = DEFAULT_GET_LIST_PARAMS) =>
   axios.get('/customers', { params: { page: 0, ...params } });
+export const getCustomerById = (id: string) => axios.get(`/customer/${id}`);
+
+// Users
+export const getCustomerUsers = (
+  customerId: string,
+  params: GetListParams = DEFAULT_GET_LIST_PARAMS
+) => axios.get(`/customer/${customerId}/users`, { params: { page: 0, ...params } });
+export const getUserById = (id: string) => axios.get(`/user/${id}`);

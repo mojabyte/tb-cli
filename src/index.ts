@@ -137,7 +137,7 @@ const backup = async (output: string) => {
 
   await fsPromise.mkdir(baseDir, { recursive: true });
 
-  const dirs = ['ruleChains', 'widgets', 'dashboards', 'devices'];
+  const dirs = ['ruleChains', 'widgets', 'dashboards', 'devices', 'customers'];
 
   await Promise.all(
     dirs.map(
@@ -335,7 +335,85 @@ const backup = async (output: string) => {
       });
   });
 
-  await Promise.all([backupRuleChains, backupWidgets, backupDashboards, backupDevices]);
+  // Backup customers and their users
+  const backupCustomerUsers = (user: any, dir: string) =>
+    new Promise<void>((resolve, reject) => {
+      api
+        .getUserById(user.id.id)
+        .then(({ data: userData }) => {
+          fsPromise
+            .writeFile(path.join(dir, `${user.name}.json`), JSON.stringify(userData, undefined, 2))
+            .then(resolve);
+        })
+        .catch(e => {
+          console.log(e);
+          reject(e);
+        });
+    });
+
+  const backupCustomer = (customer: any) =>
+    Promise.all([
+      new Promise<void>((resolve, reject) => {
+        api
+          .getCustomerById(customer.id.id)
+          .then(({ data: customerData }) => {
+            fsPromise
+              .writeFile(
+                path.join(baseDir, 'customers', `${customer.name}.json`),
+                JSON.stringify(customerData, undefined, 2)
+              )
+              .then(resolve);
+          })
+          .catch(e => {
+            console.log(e);
+            reject(e);
+          });
+      }),
+      new Promise<void>((resolve, reject) => {
+        api
+          .getCustomerUsers(customer.id.id)
+          .then(({ data: { data: users } }) => {
+            const dir = path.join(baseDir, 'customers', `${customer.name}`);
+            fsPromise.mkdir(dir).then(() => {
+              Promise.all(
+                users.map((user: any) => {
+                  backupCustomerUsers(user, dir);
+                })
+              ).then(() => {
+                resolve();
+              });
+            });
+          })
+          .catch(e => {
+            console.log(e);
+            reject(e);
+          });
+      }),
+    ]);
+
+  const backupCustomers = new Promise<void>((resolve, reject) => {
+    console.log('Backup Customers...');
+    api
+      .getCustomers()
+      .then(({ data: { data: customers } }) => {
+        Promise.all(customers.map(backupCustomer)).then(() => {
+          console.log('Customers backup completed!');
+          resolve();
+        });
+      })
+      .catch(e => {
+        console.log(e);
+        reject(e);
+      });
+  });
+
+  await Promise.all([
+    backupRuleChains,
+    backupWidgets,
+    backupDashboards,
+    backupDevices,
+    backupCustomers,
+  ]);
 
   git.add({ fs, dir: baseDir, filepath: '.' });
   git.commit({
