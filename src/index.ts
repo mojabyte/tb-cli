@@ -11,6 +11,7 @@ import https from 'https';
 import git from 'isomorphic-git';
 import * as api from './services/api';
 import { prompt } from './utils/prompt';
+import gitignore from './data/gitignore';
 
 let account: {
   tenantId: string;
@@ -162,7 +163,7 @@ const backup = async (output: string) => {
     await git.setConfig({ fs, dir: baseDir, path: 'user.name', value: 'Hassan Mojab' });
     await git.setConfig({ fs, dir: baseDir, path: 'user.email', value: 'mh_mojab75@yahoo.com' });
 
-    await fsPromise.copyFile('./src/data/.gitignore', path.join(baseDir, '.gitignore'));
+    await fsPromise.writeFile(path.join(baseDir, '.gitignore'), gitignore);
   }
 
   // Backup Rule Chains
