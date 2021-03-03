@@ -62,8 +62,17 @@ export const getCustomers = (params: GetListParams = DEFAULT_GET_LIST_PARAMS) =>
 export const getCustomerById = (id: string) => axios.get(`/customer/${id}`);
 
 // Users
-export const getCustomerUsers = (
-  customerId: string,
+export const getEntityUsers = (
+  entity: 'customer' | 'tenant',
+  entityId: string,
   params: GetListParams = DEFAULT_GET_LIST_PARAMS
-) => axios.get(`/customer/${customerId}/users`, { params: { page: 0, ...params } });
+) => axios.get(`/${entity}/${entityId}/users`, { params: { page: 0, ...params } });
 export const getUserById = (id: string) => axios.get(`/user/${id}`);
+export const getUserToken = (id: string) => axios.get(`/user/${id}/token`);
+
+// Tenants
+export const getTenants = (params: GetListParams = DEFAULT_GET_LIST_PARAMS) =>
+  axios.get('/tenantInfos', { params: { page: 0, ...params } });
+export const getTenantById = (id: string) => axios.get(`/tenant/${id}`);
+
+

@@ -14,6 +14,8 @@ import { prompt } from './utils/prompt';
 import gitignore from './data/gitignore';
 
 let account: {
+  scopes: ('TENANT_ADMIN' | 'SYS_ADMIN')[];
+  userId: string;
   tenantId: string;
 };
 
@@ -138,23 +140,6 @@ const backup = async (output: string) => {
 
   await fsPromise.mkdir(baseDir, { recursive: true });
 
-  const dirs = ['ruleChains', 'widgets', 'dashboards', 'devices', 'customers'];
-
-  await Promise.all(
-    dirs.map(
-      dir =>
-        new Promise<void>((resolve, reject) => {
-          const currentDir = path.join(baseDir, dir);
-          fsPromise
-            .rm(currentDir, { recursive: true, force: true })
-            .then(() => {
-              fsPromise.mkdir(currentDir).then(resolve);
-            })
-            .catch(reject);
-        })
-    )
-  );
-
   const gitRoot = await git.findRoot({ fs, filepath: baseDir });
   if (gitRoot !== baseDir) {
     await git.init({ fs, dir: baseDir });
@@ -166,202 +151,45 @@ const backup = async (output: string) => {
     await fsPromise.writeFile(path.join(baseDir, '.gitignore'), gitignore);
   }
 
-  // Backup Rule Chains
-  const backupRuleChain = (ruleChain: any) =>
-    new Promise<void>((resolve, reject) => {
-      api
-        .getRuleChainById(ruleChain.id.id)
-        .then(({ data: ruleChainData }) => {
-          fsPromise
-            .writeFile(
-              path.join(baseDir, 'ruleChains', `${ruleChain.name}.json`),
-              JSON.stringify(ruleChainData, undefined, 2)
-            )
-            .then(resolve);
-        })
-        .catch(e => {
-          console.log(e);
-          reject(e);
-        });
-    });
+  let tenants: {
+    id: { id: string };
+    name: string;
+  }[] = [];
 
-  const backupRuleChains = new Promise<void>((resolve, reject) => {
-    console.log('Backup Rule Chains...');
-    api
-      .getRuleChains()
-      .then(({ data: { data: ruleChains } }) => {
-        Promise.all(ruleChains.map(backupRuleChain)).then(() => {
-          console.log('Rule Chains backup completed!');
-          resolve();
-        });
-      })
-      .catch(e => {
-        console.log(e);
-        reject(e);
-      });
-  });
+  let tenantTokens = new Map<string, string>();
 
-  // Backup widgets
-  const backupWidgetBundle = (widgetBundle: any) =>
-    new Promise<void>((resolve, reject) => {
-      api
-        .getWidgetBundlesData(widgetBundle.alias)
-        .then(({ data: widgetBundleData }) => {
-          fsPromise
-            .writeFile(
-              path.join(baseDir, 'widgets', `${widgetBundle.title}.json`),
-              JSON.stringify(widgetBundleData, undefined, 2)
-            )
-            .then(resolve);
-        })
-        .catch(e => {
-          console.log(e);
-          reject(e);
-        });
-    });
+  if (account.scopes[0] === 'SYS_ADMIN') {
+    console.log('******** SysAdmin ********');
 
-  const backupWidgets = new Promise<void>((resolve, reject) => {
-    console.log('Backup Widgets...');
-    api
-      .getWidgetBundles()
-      .then(({ data: widgetBundles }) => {
-        Promise.all(
-          widgetBundles
-            .filter((widgetBundle: any) => account.tenantId === widgetBundle.tenantId.id)
-            .map(backupWidgetBundle)
-        ).then(() => {
-          console.log('Widgets backup completed!');
-          resolve();
-        });
-      })
-      .catch(e => {
-        console.log(e);
-        reject(e);
-      });
-  });
+    const dirs = ['tenants'];
 
-  // Backup Dashboards
-  const backupDashboard = (dashboard: any) =>
-    new Promise<void>((resolve, reject) => {
-      api
-        .getDashboardById(dashboard.id.id)
-        .then(({ data: dashboardData }) => {
-          fsPromise
-            .writeFile(
-              path.join(baseDir, 'dashboards', `${dashboard.name}.json`),
-              JSON.stringify(dashboardData, undefined, 2)
-            )
-            .then(resolve);
-        })
-        .catch(e => {
-          console.log(e);
-          reject(e);
-        });
-    });
+    await Promise.all(
+      dirs.map(
+        dir =>
+          new Promise<void>((resolve, reject) => {
+            const currentDir = path.join(baseDir, dir);
+            fsPromise
+              .rm(currentDir, { recursive: true, force: true })
+              .then(() => {
+                fsPromise.mkdir(currentDir).then(resolve);
+              })
+              .catch(reject);
+          })
+      )
+    );
 
-  const backupDashboards = new Promise<void>((resolve, reject) => {
-    console.log('Backup Dashboards...');
-    api
-      .getDashboards()
-      .then(({ data: { data: dashboards } }) => {
-        Promise.all(dashboards.map(backupDashboard)).then(() => {
-          console.log('Dashboards backup completed!');
-          resolve();
-        });
-      })
-      .catch(e => {
-        console.log(e);
-        reject(e);
-      });
-  });
+    let tenantAdmins = new Map<string, string>();
 
-  // TODO: backup device data
-  // Backup device attributes & access-tokens
-  const backupDevice = (device: any) =>
-    new Promise<void>((resolve, reject) => {
-      const deviceId = device.id.id;
-      Promise.all([
-        api.getDeviceAttributesByScope(deviceId, 'SERVER_SCOPE'),
-        api.getDeviceAttributesByScope(deviceId, 'SHARED_SCOPE'),
-        api.getDeviceAttributesByScope(deviceId, 'CLIENT_SCOPE'),
-        api.getDeviceCredentials(deviceId),
-      ]).then(
-        ([
-          { data: serverAttributes },
-          { data: sharedAttributes },
-          { data: clientAttributes },
-          { data: credentials },
-        ]) => {
-          serverAttributes.forEach((item: any) => {
-            delete item.lastUpdateTs;
-          });
-          sharedAttributes.forEach((item: any) => {
-            delete item.lastUpdateTs;
-          });
-          clientAttributes.forEach((item: any) => {
-            delete item.lastUpdateTs;
-          });
-
-          const attributes = {
-            server: serverAttributes,
-            shared: sharedAttributes,
-            client: clientAttributes,
-          };
-
-          const accessToken = credentials.credentialsId;
-
-          fsPromise
-            .writeFile(
-              path.join(baseDir, 'devices', `${device.name}.json`),
-              JSON.stringify({ accessToken, attributes }, undefined, 2)
-            )
-            .then(resolve);
-        }
-      );
-    });
-
-  const backupDevices = new Promise<void>((resolve, reject) => {
-    console.log('Backup Devices...');
-    api
-      .getDevices()
-      .then(({ data: { data: devices } }) => {
-        Promise.all(devices.map(backupDevice)).then(() => {
-          console.log('Devices backup completed!');
-          resolve();
-        });
-      })
-      .catch(e => {
-        console.log(e);
-        reject(e);
-      });
-  });
-
-  // Backup customers and their users
-  const backupCustomerUsers = (user: any, dir: string) =>
-    new Promise<void>((resolve, reject) => {
-      api
-        .getUserById(user.id.id)
-        .then(({ data: userData }) => {
-          fsPromise
-            .writeFile(path.join(dir, `${user.name}.json`), JSON.stringify(userData, undefined, 2))
-            .then(resolve);
-        })
-        .catch(e => {
-          console.log(e);
-          reject(e);
-        });
-    });
-
-  const backupCustomer = (customer: any) =>
-    Promise.all([
+    // Backup Tenants and their Admins
+    const backupTenantUsers = (user: any, dir: string) =>
       new Promise<void>((resolve, reject) => {
         api
-          .getCustomerById(customer.id.id)
-          .then(({ data: customerData }) => {
+          .getUserById(user.id.id)
+          .then(({ data: userData }) => {
             fsPromise
               .writeFile(
-                path.join(baseDir, 'customers', `${customer.name}.json`),
-                JSON.stringify(customerData, undefined, 2)
+                path.join(dir, `${user.name}.json`),
+                JSON.stringify(userData, undefined, 2)
               )
               .then(resolve);
           })
@@ -369,52 +197,372 @@ const backup = async (output: string) => {
             console.log(e);
             reject(e);
           });
-      }),
+      });
+
+    const backupTenant = (tenant: any) =>
+      Promise.all([
+        new Promise<void>((resolve, reject) => {
+          api
+            .getTenantById(tenant.id.id)
+            .then(({ data: tenantData }) => {
+              fsPromise
+                .writeFile(
+                  path.join(baseDir, 'tenants', `${tenant.name}.json`),
+                  JSON.stringify(tenantData, undefined, 2)
+                )
+                .then(resolve);
+            })
+            .catch(e => {
+              console.log(e);
+              reject(e);
+            });
+        }),
+        new Promise<void>((resolve, reject) => {
+          api
+            .getEntityUsers('tenant', tenant.id.id)
+            .then(({ data: { data: users } }) => {
+              tenantAdmins.set(tenant.id.id, users[0]?.id.id);
+              const dir = path.join(baseDir, 'tenants', `${tenant.name}`, 'tenantAdmins');
+              fsPromise.mkdir(dir, { recursive: true }).then(() => {
+                Promise.all(
+                  users.map((user: any) => {
+                    backupTenantUsers(user, dir);
+                  })
+                ).then(() => {
+                  resolve();
+                });
+              });
+            })
+            .catch(e => {
+              console.log(e);
+              reject(e);
+            });
+        }),
+      ]);
+
+    const backupTenants = new Promise<void>((resolve, reject) => {
+      console.log('Backup Tenants...');
+      api
+        .getTenants()
+        .then(({ data }) => {
+          tenants = data.data;
+          Promise.all(tenants.map(backupTenant)).then(() => {
+            console.log('Tenant backup completed!');
+            resolve();
+          });
+        })
+        .catch(e => {
+          console.log(e);
+          reject(e);
+        });
+    });
+
+    await Promise.all([backupTenants]);
+
+    // Get token of first Tenant Admin of each Tenant
+    await Promise.all(
+      Array.from(tenantAdmins).map(
+        ([tenantId, adminId]: [string, string]) =>
+          new Promise<void>((resolve, reject) => {
+            api
+              .getUserToken(adminId)
+              .then(({ data: { token } }) => {
+                tenantTokens.set(tenantId, token);
+                resolve();
+              })
+              .catch(e => {
+                console.log(e);
+                reject(e);
+              });
+          })
+      )
+    );
+  } else if (account.scopes[0] === 'TENANT_ADMIN') {
+    const { data: tenant } = await api.getTenantById(account.tenantId);
+    tenants = [tenant];
+  } else {
+    console.log('Please login with a Tenant or SysAdmin account!');
+  }
+
+  for (const tenant of tenants) {
+    const token = tenantTokens.get(tenant.id.id);
+    if (token) {
+      setToken(token);
+    }
+
+    console.log(`******** Tenant ${tenant.name} ********`);
+    const tenantDir = path.join(baseDir, 'tenants', tenant.name);
+    await fsPromise.mkdir(tenantDir, { recursive: true });
+    const dirs = ['ruleChains', 'widgets', 'dashboards', 'devices', 'customers'];
+
+    await Promise.all(
+      dirs.map(
+        dir =>
+          new Promise<void>((resolve, reject) => {
+            const currentDir = path.join(tenantDir, dir);
+            fsPromise
+              .rm(currentDir, { recursive: true, force: true })
+              .then(() => {
+                fsPromise.mkdir(currentDir).then(resolve);
+              })
+              .catch(reject);
+          })
+      )
+    );
+
+    // Backup Rule Chains
+    const backupRuleChain = (ruleChain: any) =>
       new Promise<void>((resolve, reject) => {
         api
-          .getCustomerUsers(customer.id.id)
-          .then(({ data: { data: users } }) => {
-            const dir = path.join(baseDir, 'customers', `${customer.name}`);
-            fsPromise.mkdir(dir).then(() => {
-              Promise.all(
-                users.map((user: any) => {
-                  backupCustomerUsers(user, dir);
-                })
-              ).then(() => {
-                resolve();
-              });
-            });
+          .getRuleChainById(ruleChain.id.id)
+          .then(({ data: ruleChainData }) => {
+            fsPromise
+              .writeFile(
+                path.join(tenantDir, 'ruleChains', `${ruleChain.name}.json`),
+                JSON.stringify(ruleChainData, undefined, 2)
+              )
+              .then(resolve);
           })
           .catch(e => {
             console.log(e);
             reject(e);
           });
-      }),
-    ]);
-
-  const backupCustomers = new Promise<void>((resolve, reject) => {
-    console.log('Backup Customers...');
-    api
-      .getCustomers()
-      .then(({ data: { data: customers } }) => {
-        Promise.all(customers.map(backupCustomer)).then(() => {
-          console.log('Customers backup completed!');
-          resolve();
-        });
-      })
-      .catch(e => {
-        console.log(e);
-        reject(e);
       });
-  });
 
-  await Promise.all([
-    backupRuleChains,
-    backupWidgets,
-    backupDashboards,
-    backupDevices,
-    backupCustomers,
-  ]);
+    const backupRuleChains = new Promise<void>((resolve, reject) => {
+      console.log('Backup Rule Chains...');
+      api
+        .getRuleChains()
+        .then(({ data: { data: ruleChains } }) => {
+          Promise.all(ruleChains.map(backupRuleChain)).then(() => {
+            console.log('Rule Chains backup completed!');
+            resolve();
+          });
+        })
+        .catch(e => {
+          console.log(e);
+          reject(e);
+        });
+    });
+
+    // Backup widgets
+    const backupWidgetBundle = (widgetBundle: any) =>
+      new Promise<void>((resolve, reject) => {
+        api
+          .getWidgetBundlesData(widgetBundle.alias)
+          .then(({ data: widgetBundleData }) => {
+            fsPromise
+              .writeFile(
+                path.join(tenantDir, 'widgets', `${widgetBundle.title}.json`),
+                JSON.stringify(widgetBundleData, undefined, 2)
+              )
+              .then(resolve);
+          })
+          .catch(e => {
+            console.log(e);
+            reject(e);
+          });
+      });
+
+    const backupWidgets = new Promise<void>((resolve, reject) => {
+      console.log('Backup Widgets...');
+      api
+        .getWidgetBundles()
+        .then(({ data: widgetBundles }) => {
+          Promise.all(
+            widgetBundles
+              .filter((widgetBundle: any) => account.tenantId === widgetBundle.tenantId.id)
+              .map(backupWidgetBundle)
+          ).then(() => {
+            console.log('Widgets backup completed!');
+            resolve();
+          });
+        })
+        .catch(e => {
+          console.log(e);
+          reject(e);
+        });
+    });
+
+    // Backup Dashboards
+    const backupDashboard = (dashboard: any) =>
+      new Promise<void>((resolve, reject) => {
+        api
+          .getDashboardById(dashboard.id.id)
+          .then(({ data: dashboardData }) => {
+            fsPromise
+              .writeFile(
+                path.join(tenantDir, 'dashboards', `${dashboard.name}.json`),
+                JSON.stringify(dashboardData, undefined, 2)
+              )
+              .then(resolve);
+          })
+          .catch(e => {
+            console.log(e);
+            reject(e);
+          });
+      });
+
+    const backupDashboards = new Promise<void>((resolve, reject) => {
+      console.log('Backup Dashboards...');
+      api
+        .getDashboards()
+        .then(({ data: { data: dashboards } }) => {
+          Promise.all(dashboards.map(backupDashboard)).then(() => {
+            console.log('Dashboards backup completed!');
+            resolve();
+          });
+        })
+        .catch(e => {
+          console.log(e);
+          reject(e);
+        });
+    });
+
+    // TODO: backup device data
+    // Backup device attributes & access-tokens
+    const backupDevice = (device: any) =>
+      new Promise<void>((resolve, reject) => {
+        const deviceId = device.id.id;
+        Promise.all([
+          api.getDeviceAttributesByScope(deviceId, 'SERVER_SCOPE'),
+          api.getDeviceAttributesByScope(deviceId, 'SHARED_SCOPE'),
+          api.getDeviceAttributesByScope(deviceId, 'CLIENT_SCOPE'),
+          api.getDeviceCredentials(deviceId),
+        ]).then(
+          ([
+            { data: serverAttributes },
+            { data: sharedAttributes },
+            { data: clientAttributes },
+            { data: credentials },
+          ]) => {
+            serverAttributes.forEach((item: any) => {
+              delete item.lastUpdateTs;
+            });
+            sharedAttributes.forEach((item: any) => {
+              delete item.lastUpdateTs;
+            });
+            clientAttributes.forEach((item: any) => {
+              delete item.lastUpdateTs;
+            });
+
+            const attributes = {
+              server: serverAttributes,
+              shared: sharedAttributes,
+              client: clientAttributes,
+            };
+
+            const accessToken = credentials.credentialsId;
+
+            fsPromise
+              .writeFile(
+                path.join(tenantDir, 'devices', `${device.name}.json`),
+                JSON.stringify({ accessToken, attributes }, undefined, 2)
+              )
+              .then(resolve);
+          }
+        );
+      });
+
+    const backupDevices = new Promise<void>((resolve, reject) => {
+      console.log('Backup Devices...');
+      api
+        .getDevices()
+        .then(({ data: { data: devices } }) => {
+          Promise.all(devices.map(backupDevice)).then(() => {
+            console.log('Devices backup completed!');
+            resolve();
+          });
+        })
+        .catch(e => {
+          console.log(e);
+          reject(e);
+        });
+    });
+
+    // Backup customers and their users
+    const backupCustomerUsers = (user: any, dir: string) =>
+      new Promise<void>((resolve, reject) => {
+        api
+          .getUserById(user.id.id)
+          .then(({ data: userData }) => {
+            fsPromise
+              .writeFile(
+                path.join(dir, `${user.name}.json`),
+                JSON.stringify(userData, undefined, 2)
+              )
+              .then(resolve);
+          })
+          .catch(e => {
+            console.log(e);
+            reject(e);
+          });
+      });
+
+    const backupCustomer = (customer: any) =>
+      Promise.all([
+        new Promise<void>((resolve, reject) => {
+          api
+            .getCustomerById(customer.id.id)
+            .then(({ data: customerData }) => {
+              fsPromise
+                .writeFile(
+                  path.join(tenantDir, 'customers', `${customer.name}.json`),
+                  JSON.stringify(customerData, undefined, 2)
+                )
+                .then(resolve);
+            })
+            .catch(e => {
+              console.log(e);
+              reject(e);
+            });
+        }),
+        new Promise<void>((resolve, reject) => {
+          api
+            .getEntityUsers('customer', customer.id.id)
+            .then(({ data: { data: users } }) => {
+              const dir = path.join(tenantDir, 'customers', `${customer.name}`);
+              fsPromise.mkdir(dir).then(() => {
+                Promise.all(
+                  users.map((user: any) => {
+                    backupCustomerUsers(user, dir);
+                  })
+                ).then(() => {
+                  resolve();
+                });
+              });
+            })
+            .catch(e => {
+              console.log(e);
+              reject(e);
+            });
+        }),
+      ]);
+
+    const backupCustomers = new Promise<void>((resolve, reject) => {
+      console.log('Backup Customers...');
+      api
+        .getCustomers()
+        .then(({ data: { data: customers } }) => {
+          Promise.all(customers.map(backupCustomer)).then(() => {
+            console.log('Customers backup completed!');
+            resolve();
+          });
+        })
+        .catch(e => {
+          console.log(e);
+          reject(e);
+        });
+    });
+
+    await Promise.all([
+      backupRuleChains,
+      backupWidgets,
+      backupDashboards,
+      backupDevices,
+      backupCustomers,
+    ]);
+  }
 
   git.add({ fs, dir: baseDir, filepath: '.' });
   git.commit({
@@ -508,7 +656,7 @@ const restore = async (dir: string, options: string[]) => {
                 );
                 deviceId = data.id.id;
               } catch (e) {
-                // If device already exists just restore its accessToke
+                // If device already exists just restore its accessToken
                 if (e.response?.data?.errorCode === 31) {
                   const {
                     data: { data: devices },
