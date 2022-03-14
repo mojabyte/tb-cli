@@ -1,6 +1,6 @@
 {
   "name": "tb-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "ThingsBoard CLI",
   "main": "build/index.js",
   "scripts": {
@@ -16,18 +16,18 @@
     "tb": "./build/index.js"
   },
   "devDependencies": {
-    "@types/node": "^17.0.5",
-    "concurrently": "^5.3.0",
+    "@types/node": "^17.0.21",
+    "concurrently": "^7.0.0",
     "nodemon": "^2.0.15",
-    "ts-node": "^9.1.1",
-    "typescript": "^4.1.5"
+    "ts-node": "^10.7.0",
+    "typescript": "^4.6.2"
   },
   "dependencies": {
-    "axios": "^0.24.0",
-    "commander": "^7.1.0",
-    "isomorphic-git": "^1.8.2",
+    "axios": "^0.26.1",
+    "commander": "^9.0.0",
+    "isomorphic-git": "^1.13.1",
     "jwt-decode": "^3.1.2",
-    "keytar": "^7.7.0",
+    "keytar": "^7.9.0",
     "moment": "^2.29.1"
   }
 }
